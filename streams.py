@@ -1,4 +1,4 @@
-# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
+# Copyright 2024 DeepMind Technologies Limited. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -259,5 +259,4 @@ async def endless_stream() -> AsyncIterable[Any]:
   """
   while True:
     await asyncio.sleep(1)
-  # Unreachable. Needed to make the function a generator.
-  yield None
+  # Unreachable.
