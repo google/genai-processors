@@ -1,4 +1,4 @@
-# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
+# Copyright 2024 DeepMind Technologies Limited. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -134,7 +134,7 @@ class Processor(abc.ABC):
     # handled correctly.
     tg = context_lib.task_group()
     if tg is None:
-      output_queue = asyncio.Queue[ProcessorPart | None]()
+      output_queue = asyncio.Queue[ProcessorPart | None](maxsize=_MAX_QUEUE_SIZE)
 
       async def _with_context():
         async with context():
