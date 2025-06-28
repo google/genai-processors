@@ -134,7 +134,7 @@ class Processor(abc.ABC):
     # handled correctly.
     tg = context_lib.task_group()
     if tg is None:
-      output_queue = asyncio.Queue[ProcessorPart | None]()
+      output_queue = asyncio.Queue[ProcessorPart | None](maxsize=_MAX_QUEUE_SIZE)
 
       async def _with_context():
         async with context():

@@ -259,5 +259,4 @@ async def endless_stream() -> AsyncIterable[Any]:
   """
   while True:
     await asyncio.sleep(1)
-  # Unreachable. Needed to make the function a generator.
-  yield None
+  # Unreachable.
