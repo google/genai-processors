@@ -7,7 +7,7 @@ setup(
     install_requires=[
         'google-generativeai',
     ],
-    python_requires='>=3.10',
+    python_requires='>=3.11',
     author='Google',  # Inferred from the original repo
     description='Build Modular, Asynchronous, and Composable AI Pipelines for Generative AI.',
     long_description=open('README.md').read(),
