@@ -1,6 +1,5 @@
 """Tests for OpenRouter model processor."""
 
-import asyncio
 import json
 import unittest
 from unittest import mock
@@ -14,7 +13,9 @@ from google.genai import types as genai_types
 import httpx
 
 
-class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCase):
+class OpenRouterModelTest(
+    parameterized.TestCase, unittest.IsolatedAsyncioTestCase
+):
   """Tests for OpenRouterModel processor."""
 
   def setUp(self):
@@ -32,7 +33,7 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
         api_key=self.api_key,
         model_name=self.model_name,
     )
-    
+
     self.assertEqual(model._api_key, self.api_key)
     self.assertEqual(model._model_name, self.model_name)
     self.assertEqual(model._base_url, openrouter_model._DEFAULT_BASE_URL)
@@ -44,7 +45,7 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
     site_url = 'https://example.com'
     site_name = 'Test Site'
     base_url = 'https://custom.openrouter.com/api/v1'
-    
+
     model = openrouter_model.OpenRouterModel(
         api_key=self.api_key,
         model_name=self.model_name,
@@ -53,7 +54,7 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
         site_name=site_name,
         generate_content_config=self.base_config,
     )
-    
+
     self.assertEqual(model._base_url, base_url)
     self.assertEqual(model._site_url, site_url)
     self.assertEqual(model._site_name, site_name)
@@ -65,7 +66,7 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
         api_key=self.api_key,
         model_name=self.model_name,
     )
-    
+
     expected_prefix = f'OpenRouterModel_{self.model_name}'
     self.assertEqual(model.key_prefix, expected_prefix)
 
@@ -94,19 +95,18 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
   def test_to_openrouter_message_function_call(self):
     """Test conversion of function call parts."""
     func_call = genai_types.Part.from_function_call(
-        name='test_function',
-        args={'param1': 'value1', 'param2': 42}
+        name='test_function', args={'param1': 'value1', 'param2': 42}
     )
     part = content_api.ProcessorPart(func_call, role='model')
-    
+
     result = openrouter_model._to_openrouter_message(part)
-    
+
     expected = {
         'role': 'assistant',
         'function_call': {
             'name': 'test_function',
             'arguments': json.dumps({'param1': 'value1', 'param2': 42}),
-        }
+        },
     }
     self.assertEqual(result, expected)
 
@@ -158,42 +158,43 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
     mock_response = mock.AsyncMock()
     mock_response.aiter_text = mock_aiter_text
     mock_response.raise_for_status = mock.AsyncMock()
-    
+
     mock_context = mock.AsyncMock()
     mock_context.__aenter__ = mock.AsyncMock(return_value=mock_response)
     mock_context.__aexit__ = mock.AsyncMock(return_value=None)
-    
+
     with mock.patch.object(
-        httpx.AsyncClient, 'stream',
-        return_value=mock_context
+        httpx.AsyncClient, 'stream', return_value=mock_context
     ) as mock_stream:
-      
+
       model = openrouter_model.OpenRouterModel(
           api_key=self.api_key,
           model_name=self.model_name,
           generate_content_config=self.base_config,
       )
-      
+
       input_content = [content_api.ProcessorPart('Test input')]
       result = []
-      
+
       async for part in model(streams.stream_content(input_content)):
         result.append(part)
-      
+
       # Verify the request was made correctly
       mock_stream.assert_called_once()
       call_args = mock_stream.call_args
       self.assertEqual(call_args[0][0], 'POST')
       self.assertEqual(call_args[0][1], '/chat/completions')
-      
+
       # Check the request payload
       request_json = call_args[1]['json']
       self.assertEqual(request_json['model'], self.model_name)
-      self.assertEqual(request_json['messages'], [{'role': 'user', 'content': 'Test input'}])
+      self.assertEqual(
+          request_json['messages'], [{'role': 'user', 'content': 'Test input'}]
+      )
       self.assertTrue(request_json['stream'])
       self.assertEqual(request_json['temperature'], 0.7)
       self.assertEqual(request_json['max_tokens'], 100)
-      
+
       # Verify the response processing
       self.assertEqual(len(result), 3)  # Two content chunks + finish reason
       self.assertEqual(result[0].text, 'Hello')
@@ -208,29 +209,26 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
     error_response.aread = mock.AsyncMock(
         return_value=b'{"error": {"message": "Invalid API key"}}'
     )
-    
+
     http_error = httpx.HTTPStatusError(
-        "401 Unauthorized",
-        request=mock.Mock(),
-        response=error_response
+        '401 Unauthorized', request=mock.Mock(), response=error_response
     )
 
-    with mock.patch.object(
-        httpx.AsyncClient, 'stream',
-        side_effect=http_error
-    ):
+    with mock.patch.object(httpx.AsyncClient, 'stream', side_effect=http_error):
       model = openrouter_model.OpenRouterModel(
           api_key='invalid_key',
           model_name=self.model_name,
       )
-      
+
       input_content = [content_api.ProcessorPart('Test input')]
-      
+
       with self.assertRaises(RuntimeError) as context:
         async for _ in model(streams.stream_content(input_content)):
           pass
-      
-      self.assertIn('OpenRouter API error: Invalid API key', str(context.exception))
+
+      self.assertIn(
+          'OpenRouter API error: Invalid API key', str(context.exception)
+      )
 
   async def test_call_with_empty_input(self):
     """Test call method with empty input."""
@@ -238,14 +236,14 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
         api_key=self.api_key,
         model_name=self.model_name,
     )
-    
+
     # Empty input should return immediately without making API calls
     input_content = []
     result = []
-    
+
     async for part in model(streams.stream_content(input_content)):
       result.append(part)
-    
+
     self.assertEqual(len(result), 0)
 
   def test_build_metadata(self):
@@ -254,7 +252,7 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
         api_key=self.api_key,
         model_name=self.model_name,
     )
-    
+
     response_data = {
         'id': 'chatcmpl-123',
         'model': 'openai/gpt-4o',
@@ -263,11 +261,11 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
             'prompt_tokens': 10,
             'completion_tokens': 20,
             'total_tokens': 30,
-        }
+        },
     }
-    
+
     metadata = model._build_metadata(response_data)
-    
+
     expected = {
         'request_id': 'chatcmpl-123',
         'model': 'openai/gpt-4o',
@@ -276,9 +274,9 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
             'prompt_tokens': 10,
             'completion_tokens': 20,
             'total_tokens': 30,
-        }
+        },
     }
-    
+
     self.assertEqual(metadata, expected)
 
   async def test_aclose(self):
@@ -287,7 +285,7 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
         api_key=self.api_key,
         model_name=self.model_name,
     )
-    
+
     with mock.patch.object(model._client, 'aclose') as mock_aclose:
       await model.aclose()
       mock_aclose.assert_called_once()
@@ -307,23 +305,22 @@ class OpenRouterModelTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCa
     mock_response = mock.AsyncMock()
     mock_response.aiter_text = mock_aiter_text
     mock_response.raise_for_status = mock.AsyncMock()
-    
+
     mock_context = mock.AsyncMock()
     mock_context.__aenter__ = mock.AsyncMock(return_value=mock_response)
     mock_context.__aexit__ = mock.AsyncMock(return_value=None)
-    
+
     with mock.patch.object(
-        httpx.AsyncClient, 'stream',
-        return_value=mock_context
+        httpx.AsyncClient, 'stream', return_value=mock_context
     ):
       model = openrouter_model.OpenRouterModel(
           api_key=self.api_key,
           model_name=self.model_name,
       )
-      
+
       input_content = [content_api.ProcessorPart('Test sync input')]
       result = processor.apply_sync(model, input_content)
-      
+
       # Should get the content response
       text_parts = [part for part in result if part.text]
       self.assertEqual(len(text_parts), 1)

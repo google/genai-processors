@@ -53,11 +53,9 @@ For a complete list, visit: https://openrouter.ai/models
 import asyncio
 from collections.abc import AsyncIterable
 import json
-import re
 from typing import Any, Literal
 
 from genai_processors import content_api
-from genai_processors import mime_types
 from genai_processors import processor
 from google.genai import types as genai_types
 import httpx
@@ -125,7 +123,7 @@ class GenerateContentConfig(TypedDict, total=False):
   models: list[str] | None
   """Fallback models if primary model fails."""
 
-  route: Literal["fallback"] | None
+  route: Literal['fallback'] | None
   """Routing strategy for model selection."""
 
   provider: dict[str, Any] | None
@@ -137,7 +135,7 @@ def _to_openrouter_message(
 ) -> dict[str, Any]:
   """Convert ProcessorPart to OpenRouter message format."""
   role = part.role.lower() if part.role else default_role
-  
+
   # Handle function calls
   if hasattr(part.part, 'function_call') and part.part.function_call:
     return {
@@ -145,9 +143,9 @@ def _to_openrouter_message(
         'function_call': {
             'name': part.part.function_call.name,
             'arguments': json.dumps(part.part.function_call.args),
-        }
+        },
     }
-  
+
   # Handle function responses
   if hasattr(part.part, 'function_response') and part.part.function_response:
     return {
@@ -155,20 +153,23 @@ def _to_openrouter_message(
         'name': part.part.function_response.name,
         'content': json.dumps(part.part.function_response.response),
     }
-  
+
   # Handle text content
   if content_api.is_text(part.mimetype):
     return {
         'role': role,
         'content': part.text,
     }
-  
+
   # Handle multimodal content
   if content_api.is_image(part.mimetype):
     # Convert image to base64 for OpenRouter
     import base64
+
     if part.part.inline_data:
-      encoded_image = base64.b64encode(part.part.inline_data.data).decode('utf-8')
+      encoded_image = base64.b64encode(part.part.inline_data.data).decode(
+          'utf-8'
+      )
       return {
           'role': role,
           'content': [
@@ -176,11 +177,11 @@ def _to_openrouter_message(
                   'type': 'image_url',
                   'image_url': {
                       'url': f'data:{part.mimetype};base64,{encoded_image}'
-                  }
+                  },
               }
-          ]
+          ],
       }
-  
+
   # Fallback to text representation
   return {
       'role': role,
@@ -191,28 +192,28 @@ def _to_openrouter_message(
 def _parse_sse_line(line: str) -> dict[str, Any] | None:
   """Parse a Server-Sent Events line."""
   line = line.strip()
-  
+
   # Skip comments and empty lines
   if not line or line.startswith(':'):
     return None
-  
+
   # Parse data lines
   if line.startswith('data: '):
     data = line[6:]
     if data == '[DONE]':
       return {'type': 'done'}
-    
+
     try:
       return json.loads(data)
     except json.JSONDecodeError:
       return None
-  
+
   return None
 
 
 class OpenRouterModel(processor.Processor):
   """`Processor` that calls OpenRouter API with streaming support.
-  
+
   OpenRouter provides access to hundreds of AI models through a unified API,
   including models from OpenAI, Anthropic, Google, Meta, and many others.
   """
@@ -246,19 +247,19 @@ class OpenRouterModel(processor.Processor):
     self._site_url = site_url
     self._site_name = site_name
     self._config = generate_content_config or {}
-    
+
     # Build headers
     headers = {
         'Authorization': f'Bearer {self._api_key}',
         'Content-Type': 'application/json',
         'User-Agent': 'genai-processors',
     }
-    
+
     if self._site_url:
       headers['HTTP-Referer'] = self._site_url
     if self._site_name:
       headers['X-Title'] = self._site_name
-    
+
     self._client = httpx.AsyncClient(
         base_url=self._base_url,
         headers=headers,
@@ -292,7 +293,7 @@ class OpenRouterModel(processor.Processor):
         'messages': messages,
         'stream': self._config.get('stream', True),
     }
-    
+
     # Add configuration parameters
     for key, value in self._config.items():
       if key != 'stream' and value is not None:
@@ -306,31 +307,31 @@ class OpenRouterModel(processor.Processor):
           json=payload,
       ) as response:
         response.raise_for_status()
-        
+
         # Process streaming response
-        buffer = ""
+        buffer = ''
         async for chunk in response.aiter_text():
           buffer += chunk
-          
+
           # Process complete lines
           while '\n' in buffer:
             line, buffer = buffer.split('\n', 1)
-            
+
             parsed = _parse_sse_line(line)
             if not parsed:
               continue
-            
+
             if parsed.get('type') == 'done':
               break
-            
+
             # Extract content from the response
             choices = parsed.get('choices', [])
             if not choices:
               continue
-            
+
             choice = choices[0]
             delta = choice.get('delta', {})
-            
+
             # Handle content delta
             if 'content' in delta and delta['content']:
               yield content_api.ProcessorPart(
@@ -338,7 +339,7 @@ class OpenRouterModel(processor.Processor):
                   role='model',
                   metadata=self._build_metadata(parsed),
               )
-            
+
             # Handle function calls
             if 'function_call' in delta and delta['function_call']:
               func_call = delta['function_call']
@@ -354,7 +355,7 @@ class OpenRouterModel(processor.Processor):
                     role='model',
                     metadata=self._build_metadata(parsed),
                 )
-            
+
             # Handle finish reason
             finish_reason = choice.get('finish_reason')
             if finish_reason:
@@ -365,7 +366,7 @@ class OpenRouterModel(processor.Processor):
                       **self._build_metadata(parsed),
                       'finish_reason': finish_reason,
                       'generation_complete': True,
-                  }
+                  },
               )
 
     except httpx.HTTPStatusError as e:
@@ -375,31 +376,31 @@ class OpenRouterModel(processor.Processor):
         error_message = error_data.get('error', {}).get('message', str(e))
       except json.JSONDecodeError:
         error_message = str(e)
-      
+
       raise RuntimeError(f'OpenRouter API error: {error_message}') from e
-    
+
     except Exception as e:
       raise RuntimeError(f'OpenRouter request failed: {e}') from e
 
   def _build_metadata(self, response_data: dict[str, Any]) -> dict[str, Any]:
     """Build metadata from OpenRouter response."""
     metadata = {}
-    
+
     # Add usage information if available
     if 'usage' in response_data:
       metadata['usage'] = response_data['usage']
-    
+
     # Add model information
     if 'model' in response_data:
       metadata['model'] = response_data['model']
-    
+
     # Add OpenRouter-specific metadata
     if 'id' in response_data:
       metadata['request_id'] = response_data['id']
-    
+
     if 'created' in response_data:
       metadata['created'] = response_data['created']
-    
+
     return metadata
 
   async def aclose(self):
