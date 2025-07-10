@@ -12,11 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-
-from .openrouter_model import OpenRouterModel
-from .openrouter_model import GenerateContentConfig
-
-__all__ = [
-    'OpenRouterModel',
-    'GenerateContentConfig',
-]

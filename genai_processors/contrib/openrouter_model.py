@@ -137,21 +137,21 @@ def _to_openrouter_message(
   role = part.role.lower() if part.role else default_role
 
   # Handle function calls
-  if hasattr(part.part, 'function_call') and part.part.function_call:
+  if part.function_call:
     return {
-        'role': 'assistant',
+        'role': part.role.lower(),
         'function_call': {
-            'name': part.part.function_call.name,
-            'arguments': json.dumps(part.part.function_call.args),
+            'name': part.function_call.name,
+            'arguments': json.dumps(part.function_call.args),
         },
     }
 
   # Handle function responses
-  if hasattr(part.part, 'function_response') and part.part.function_response:
+  if part.function_response:
     return {
         'role': 'function',
-        'name': part.part.function_response.name,
-        'content': json.dumps(part.part.function_response.response),
+        'name': part.function_response.name,
+        'content': json.dumps(part.function_response.response),
     }
 
   # Handle text content

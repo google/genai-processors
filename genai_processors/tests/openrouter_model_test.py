@@ -102,7 +102,7 @@ class OpenRouterModelTest(
     result = openrouter_model._to_openrouter_message(part)
 
     expected = {
-        'role': 'assistant',
+        'role': 'model',
         'function_call': {
             'name': 'test_function',
             'arguments': json.dumps({'param1': 'value1', 'param2': 42}),
