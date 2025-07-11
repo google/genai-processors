@@ -251,6 +251,13 @@ class ProcessorPipelineTest(unittest.TestCase):
     )
     self.assertEqual(content_api.as_text(output), 'Agent: Hello world!')
 
+  def test_apply_sync(self):
+    # Check that conversion to the ProcessorContent works.
+    result = processor.apply_sync(processor.passthrough(), 'foo')
+    self.assertEqual(content_api.as_text(result), 'foo')
+    # And the sring has not been split in-to per-letter parts.
+    self.assertEqual(len(result), 1)
+
 
 class PartProcessorTest(unittest.TestCase):
 
