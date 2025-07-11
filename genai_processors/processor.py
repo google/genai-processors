@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
-from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Sequence
 import functools
 import inspect
 import types
@@ -40,6 +40,8 @@ STATUS_STREAM = context_lib.STATUS_STREAM
 
 ProcessorPart = content_api.ProcessorPart
 ProcessorPartTypes = content_api.ProcessorPartTypes
+ProcessorContent = content_api.ProcessorContent
+ProcessorContentTypes = content_api.ProcessorContentTypes
 MatchFn: TypeAlias = Callable[[ProcessorPart], bool]
 
 stream_content = streams.stream_content
@@ -382,7 +384,7 @@ def status(content: ProcessorPartTypes, **kwargs) -> ProcessorPart:
 
 
 async def apply_async(
-    processor: Processor | PartProcessor, content: Iterable[ProcessorPart]
+    processor: Processor | PartProcessor, content: ProcessorContentTypes
 ) -> list[ProcessorPart]:
   """Applies a Processor asynchronously.
 
@@ -398,13 +400,13 @@ async def apply_async(
   """
   async with context():
     content_processor = processor.to_processor()
-    as_async = stream_content(content)
+    as_async = stream_content(ProcessorContent(content).all_parts)
     return await gather_stream(content_processor(as_async))
 
 
 def apply_sync(
     processor: Processor | PartProcessor,
-    content: Iterable[ProcessorPartTypes],
+    content: ProcessorContentTypes,
 ) -> list[ProcessorPart]:
   """Applies a Processor synchronously.
 
