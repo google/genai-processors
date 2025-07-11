@@ -1115,7 +1115,7 @@ def source(stop_on_first: bool = True) -> _SourceDecorator:
   For example here is one reading input from stdin:
 
   ```py
-  @processor.source
+  @processor.source()
   async def TerminalInput(prompt: str) -> AsyncIterable[ProcessorPartTypes]:
     # We rely on asyncio task cancellation to exit the loop.
     while True:
