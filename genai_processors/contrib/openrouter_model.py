@@ -50,7 +50,6 @@ OpenRouter provides access to hundreds of models including:
 For a complete list, visit: https://openrouter.ai/models
 """
 
-import asyncio
 from collections.abc import AsyncIterable
 import json
 from typing import Any, Literal
@@ -64,6 +63,21 @@ from typing_extensions import TypedDict
 
 _DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1'
 _DEFAULT_TIMEOUT = 300
+
+
+class OpenRouterAPIError(Exception):
+  """Base exception for OpenRouter API errors."""
+  pass
+
+
+class AuthenticationError(OpenRouterAPIError):
+  """Raised when API authentication fails."""
+  pass
+
+
+class RateLimitError(OpenRouterAPIError):
+  """Raised when API rate limit is exceeded."""
+  pass
 
 
 class GenerateContentConfig(TypedDict, total=False):
@@ -104,9 +118,6 @@ class GenerateContentConfig(TypedDict, total=False):
 
   stop: list[str] | str | None
   """Stop sequences to end generation."""
-
-  stream: bool
-  """Whether to stream the response. Defaults to True."""
 
   tools: list[dict[str, Any]] | None
   """Function calling tools available to the model."""
@@ -166,10 +177,8 @@ def _to_openrouter_message(
     # Convert image to base64 for OpenRouter
     import base64
 
-    if part.part.inline_data:
-      encoded_image = base64.b64encode(part.part.inline_data.data).decode(
-          'utf-8'
-      )
+    if part.bytes:
+      encoded_image = base64.b64encode(part.bytes).decode('utf-8')
       return {
           'role': role,
           'content': [
@@ -182,11 +191,8 @@ def _to_openrouter_message(
           ],
       }
 
-  # Fallback to text representation
-  return {
-      'role': role,
-      'content': str(part.part),
-  }
+  # Fail verbosely for unsupported types
+  raise ValueError(f'Unsupported Part type: {part.mimetype}')
 
 
 def _parse_sse_line(line: str) -> dict[str, Any] | None:
@@ -203,10 +209,8 @@ def _parse_sse_line(line: str) -> dict[str, Any] | None:
     if data == '[DONE]':
       return {'type': 'done'}
 
-    try:
-      return json.loads(data)
-    except json.JSONDecodeError:
-      return None
+    # Let JSON errors propagate - don't suppress them
+    return json.loads(data)
 
   return None
 
@@ -271,18 +275,29 @@ class OpenRouterModel(processor.Processor):
     """Key prefix for caching."""
     return f'OpenRouterModel_{self._model_name}'
 
+  def _parse_error_response(self, error_body: bytes) -> str:
+    """Parse error details from API response.
+
+    Args:
+        error_body: Raw error response body from the API.
+
+    Returns:
+        Human-readable error message extracted from the response.
+    """
+    try:
+      error_data = json.loads(error_body)
+      # OpenRouter typically returns errors in {"error": {"message": "..."}} format
+      return error_data.get('error', {}).get('message', error_body.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+      return error_body.decode('utf-8', errors='replace')
+
   async def call(
-      self, content: AsyncIterable[content_api.ProcessorPartTypes]
-  ) -> AsyncIterable[content_api.ProcessorPartTypes]:
+      self, content: AsyncIterable[content_api.ProcessorPart]
+  ) -> AsyncIterable[content_api.ProcessorPart]:
     """Process content through OpenRouter API."""
     messages = []
     async for part in content:
-      if isinstance(part, content_api.ProcessorPart):
-        messages.append(_to_openrouter_message(part))
-      else:
-        # Convert other types to ProcessorPart first
-        processor_part = content_api.ProcessorPart(part)
-        messages.append(_to_openrouter_message(processor_part))
+      messages.append(_to_openrouter_message(part))
 
     if not messages:
       return
@@ -291,12 +306,12 @@ class OpenRouterModel(processor.Processor):
     payload = {
         'model': self._model_name,
         'messages': messages,
-        'stream': self._config.get('stream', True),
+        'stream': True,  # Always stream
     }
 
     # Add configuration parameters
     for key, value in self._config.items():
-      if key != 'stream' and value is not None:
+      if value is not None:
         payload[key] = value
 
     try:
@@ -306,81 +321,83 @@ class OpenRouterModel(processor.Processor):
           '/chat/completions',
           json=payload,
       ) as response:
-        response.raise_for_status()
+        try:
+          response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+          error_body = await e.response.aread()
+          error_detail = self._parse_error_response(error_body)          
+          # Handle specific HTTP status codes with appropriate exceptions
+          if e.response.status_code == 401:
+            raise AuthenticationError(f"Invalid API key: {error_detail}") from e
+          elif e.response.status_code == 429:
+            retry_after = e.response.headers.get('Retry-After')
+            raise RateLimitError(
+                f"Rate limit exceeded. Retry after: {retry_after}s" if retry_after 
+                else "Rate limit exceeded"
+            ) from e
+          else:
+            raise OpenRouterAPIError(
+                f"API request failed ({e.response.status_code}): {error_detail}"
+            ) from e
 
-        # Process streaming response
-        buffer = ''
-        async for chunk in response.aiter_text():
-          buffer += chunk
+        # Use aiter_lines for easier line processing
+        async for line in response.aiter_lines():
+          parsed = _parse_sse_line(line)
+          if not parsed:
+            continue
 
-          # Process complete lines
-          while '\n' in buffer:
-            line, buffer = buffer.split('\n', 1)
+          if parsed.get('type') == 'done':
+            break
 
-            parsed = _parse_sse_line(line)
-            if not parsed:
-              continue
+          # Extract content from the response
+          choices = parsed.get('choices', [])
+          if not choices:
+            continue
 
-            if parsed.get('type') == 'done':
-              break
+          choice = choices[0]
+          delta = choice.get('delta', {})
 
-            # Extract content from the response
-            choices = parsed.get('choices', [])
-            if not choices:
-              continue
+          # Handle content delta with walrus operator
+          if content := delta.get('content'):
+            yield content_api.ProcessorPart(
+                content,
+                role='model',
+                metadata=self._build_metadata(parsed),
+            )
 
-            choice = choices[0]
-            delta = choice.get('delta', {})
-
-            # Handle content delta
-            if 'content' in delta and delta['content']:
+          # Handle function calls
+          if 'function_call' in delta and delta['function_call']:
+            func_call = delta['function_call']
+            if 'name' in func_call or 'arguments' in func_call:
+              # For function calls, we need to accumulate the complete call
+              # This is a simplified version - in practice you might want to
+              # buffer function calls until complete
               yield content_api.ProcessorPart(
-                  delta['content'],
+                  genai_types.Part.from_function_call(
+                      name=func_call.get('name', ''),
+                      args=json.loads(func_call.get('arguments', '{}')),
+                  ),
                   role='model',
                   metadata=self._build_metadata(parsed),
               )
 
-            # Handle function calls
-            if 'function_call' in delta and delta['function_call']:
-              func_call = delta['function_call']
-              if 'name' in func_call or 'arguments' in func_call:
-                # For function calls, we need to accumulate the complete call
-                # This is a simplified version - in practice you might want to
-                # buffer function calls until complete
-                yield content_api.ProcessorPart(
-                    genai_types.Part.from_function_call(
-                        name=func_call.get('name', ''),
-                        args=json.loads(func_call.get('arguments', '{}')),
-                    ),
-                    role='model',
-                    metadata=self._build_metadata(parsed),
-                )
-
-            # Handle finish reason
-            finish_reason = choice.get('finish_reason')
-            if finish_reason:
-              yield content_api.ProcessorPart(
-                  '',
-                  role='model',
-                  metadata={
-                      **self._build_metadata(parsed),
-                      'finish_reason': finish_reason,
-                      'generation_complete': True,
-                  },
-              )
-
-    except httpx.HTTPStatusError as e:
-      error_content = await e.response.aread()
-      try:
-        error_data = json.loads(error_content)
-        error_message = error_data.get('error', {}).get('message', str(e))
-      except json.JSONDecodeError:
-        error_message = str(e)
-
-      raise RuntimeError(f'OpenRouter API error: {error_message}') from e
+          # Handle finish reason - use end_of_turn instead of generation_complete
+          finish_reason = choice.get('finish_reason')
+          if finish_reason:
+            yield content_api.ProcessorPart(
+                '',
+                role='model',
+                metadata={
+                    **self._build_metadata(parsed),
+                    'finish_reason': finish_reason,
+                    'end_of_turn': True,
+                },
+            )
 
     except Exception as e:
-      raise RuntimeError(f'OpenRouter request failed: {e}') from e
+      if not isinstance(e, (OpenRouterAPIError, AuthenticationError, RateLimitError)):
+        raise OpenRouterAPIError(f'OpenRouter request failed: {e}') from e
+      raise
 
   def _build_metadata(self, response_data: dict[str, Any]) -> dict[str, Any]:
     """Build metadata from OpenRouter response."""
@@ -407,18 +424,11 @@ class OpenRouterModel(processor.Processor):
     """Close the HTTP client."""
     await self._client.aclose()
 
-  def __del__(self):
-    """Cleanup on deletion."""
-    try:
-      # Try to close the client if it's still open
-      if hasattr(self, '_client') and self._client:
-        # Create a new event loop if needed for cleanup
-        try:
-          loop = asyncio.get_running_loop()
-          loop.create_task(self._client.aclose())
-        except RuntimeError:
-          # No running loop, create one for cleanup
-          asyncio.run(self._client.aclose())
-    except Exception:
-      # Ignore cleanup errors
-      pass
+  async def __aenter__(self):
+    """Async context manager entry."""
+    return self
+
+  async def __aexit__(self, exc_type, exc_val, exc_tb):
+    """Async context manager exit - clean up HTTP client."""
+    if hasattr(self, '_client') and self._client:
+      await self._client.aclose()

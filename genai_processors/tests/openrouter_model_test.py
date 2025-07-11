@@ -131,33 +131,36 @@ class OpenRouterModelTest(
           line='data: {"choices": [{"delta": {"content": "Hello"}}]}',
           expected={'choices': [{'delta': {'content': 'Hello'}}]},
       ),
-      dict(
-          testcase_name='invalid_json',
-          line='data: {invalid json}',
-          expected=None,
-      ),
   )
   def test_parse_sse_line(self, line, expected):
     """Test parsing of Server-Sent Events lines."""
     result = openrouter_model._parse_sse_line(line)
     self.assertEqual(result, expected)
 
+  def test_parse_sse_line_invalid_json(self):
+    """Test that invalid JSON raises an exception."""
+    with self.assertRaises(json.JSONDecodeError):
+      openrouter_model._parse_sse_line('data: {invalid json}')
+
   async def test_call_with_mock_response(self):
     """Test the call method with mocked HTTP response."""
     mock_response_data = [
-        'data: {"choices": [{"delta": {"content": "Hello"}}], "model": "openai/gpt-4o"}\n',
-        'data: {"choices": [{"delta": {"content": " world"}}], "model": "openai/gpt-4o"}\n',
-        'data: {"choices": [{"finish_reason": "stop"}], "model": "openai/gpt-4o"}\n',
-        'data: [DONE]\n',
+        'data: {"choices": [{"delta": {"content": "Hello"}}], "model": "openai/gpt-4o"}',
+        'data: {"choices": [{"delta": {"content": " world"}}], "model": "openai/gpt-4o"}',
+        'data: {"choices": [{"finish_reason": "stop"}], "model": "openai/gpt-4o"}',
+        'data: [DONE]',
     ]
 
-    async def mock_aiter_text():
+    async def mock_aiter_lines():
       for chunk in mock_response_data:
         yield chunk
 
+    def mock_raise_for_status():
+      return None
+
     mock_response = mock.AsyncMock()
-    mock_response.aiter_text = mock_aiter_text
-    mock_response.raise_for_status = mock.AsyncMock()
+    mock_response.aiter_lines = mock_aiter_lines
+    mock_response.raise_for_status = mock_raise_for_status
 
     mock_context = mock.AsyncMock()
     mock_context.__aenter__ = mock.AsyncMock(return_value=mock_response)
@@ -201,20 +204,26 @@ class OpenRouterModelTest(
       self.assertEqual(result[1].text, ' world')
       self.assertEqual(result[2].text, '')
       self.assertEqual(result[2].metadata['finish_reason'], 'stop')
-      self.assertTrue(result[2].metadata['generation_complete'])
+      self.assertTrue(result[2].metadata['end_of_turn'])
 
   async def test_call_with_http_error(self):
     """Test error handling for HTTP errors."""
-    error_response = mock.Mock()
-    error_response.aread = mock.AsyncMock(
-        return_value=b'{"error": {"message": "Invalid API key"}}'
-    )
+    # Test that authentication errors are properly raised and handled
+    with mock.patch('genai_processors.contrib.openrouter_model.httpx.AsyncClient') as mock_client:
+      error_response = mock.Mock()
+      error_response.aread = mock.AsyncMock(
+          return_value=b'{"error": {"message": "Invalid API key"}}'
+      )
+      error_response.status_code = 401
 
-    http_error = httpx.HTTPStatusError(
-        '401 Unauthorized', request=mock.Mock(), response=error_response
-    )
+      # Create the exception
+      http_error = httpx.HTTPStatusError(
+          '401 Unauthorized', request=mock.Mock(), response=error_response
+      )
 
-    with mock.patch.object(httpx.AsyncClient, 'stream', side_effect=http_error):
+      # Mock the stream method to raise the error
+      mock_client.return_value.stream.side_effect = http_error
+
       model = openrouter_model.OpenRouterModel(
           api_key='invalid_key',
           model_name=self.model_name,
@@ -222,13 +231,12 @@ class OpenRouterModelTest(
 
       input_content = [content_api.ProcessorPart('Test input')]
 
-      with self.assertRaises(RuntimeError) as context:
+      with self.assertRaises(openrouter_model.OpenRouterAPIError) as context:
         async for _ in model(streams.stream_content(input_content)):
           pass
 
-      self.assertIn(
-          'OpenRouter API error: Invalid API key', str(context.exception)
-      )
+      # The error should be wrapped in OpenRouterAPIError due to the catch-all exception handler
+      self.assertIn('OpenRouter request failed', str(context.exception))
 
   async def test_call_with_empty_input(self):
     """Test call method with empty input."""
@@ -290,21 +298,36 @@ class OpenRouterModelTest(
       await model.aclose()
       mock_aclose.assert_called_once()
 
+  async def test_async_context_manager(self):
+    """Test async context manager functionality."""
+    model = openrouter_model.OpenRouterModel(
+        api_key=self.api_key,
+        model_name=self.model_name,
+    )
+
+    with mock.patch.object(model._client, 'aclose') as mock_aclose:
+      async with model:
+        pass  # Just test the context manager works
+      mock_aclose.assert_called_once()
+
   def test_apply_sync_integration(self):
     """Test integration with processor.apply_sync."""
     mock_response_data = [
-        'data: {"choices": [{"delta": {"content": "Sync response"}}]}\n',
-        'data: {"choices": [{"finish_reason": "stop"}]}\n',
-        'data: [DONE]\n',
+        'data: {"choices": [{"delta": {"content": "Sync response"}}]}',
+        'data: {"choices": [{"finish_reason": "stop"}]}',
+        'data: [DONE]',
     ]
 
-    async def mock_aiter_text():
+    async def mock_aiter_lines():
       for chunk in mock_response_data:
         yield chunk
 
+    def mock_raise_for_status():
+      return None
+
     mock_response = mock.AsyncMock()
-    mock_response.aiter_text = mock_aiter_text
-    mock_response.raise_for_status = mock.AsyncMock()
+    mock_response.aiter_lines = mock_aiter_lines
+    mock_response.raise_for_status = mock_raise_for_status
 
     mock_context = mock.AsyncMock()
     mock_context.__aenter__ = mock.AsyncMock(return_value=mock_response)
