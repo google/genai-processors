@@ -1,0 +1,44 @@
+# Build artifacts.
+__pycache__/
+__pypackages__/
+*.py[cod]
+build/
+dist/
+
+# API keys and secrets.
+.env
+.env~
+
+# VENV.
+.venv
+venv
+
+# Test files.
+.nox/
+
+# Coverage files.
+.coverage
+coverage.xml
+nosetests.xml
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+￼
+# Pyre type checker
+.pyre/
+￼
+# pytype static type analyzer
+.pytype/
+
+# IDE files.
+.idea
+*.iml
+.vscode
+.cursorignore
+.cursorindexingignore
+
+# macOS and Win metadata.
+.DS_Store
+Thumbs.db

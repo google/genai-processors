@@ -109,14 +109,14 @@ Explore the [examples/](examples/) directory for practical demonstrations:
 
 ## 🧩 Built-in Processors
 
-The [core/](core/) directory contains a set of basic processors that you can
-leverage in your own applications. It includes the generic building blocks
-needed for most real-time applications and will evolve over time to include more
-core components.
+The [core/](genai_processors/core/) directory contains a set of basic processors
+that you can leverage in your own applications. It includes the generic building
+blocks needed for most real-time applications and will evolve over time to
+include more core components.
 
 Community contributions expanding the set of built-in processors are located
-under [contrib/](contrib/) - see the section below on how to add code to the
-GenAI Processor library.
+under [contrib/](genai_processors/contrib/) - see the section below on how to
+add code to the GenAI Processor library.
 
 ## 🤝 Contributing
 
