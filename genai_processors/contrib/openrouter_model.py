@@ -1,3 +1,18 @@
+# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
 """Wraps the OpenRouter API into a Processor.
 
 This module provides access to hundreds of AI models through OpenRouter's
@@ -23,7 +38,7 @@ p = OpenRouterModel(
 ```py
 INPUT_PROMPT = 'Write a haiku about artificial intelligence'
 
-content = processors.apply_sync(p, [ProcessorPart(INPUT_PROMPT)])
+content = processors.apply_sync(p, [INPUT_PROMPT])
 for part in content:
   if part.text:
     print(part.text)
@@ -32,8 +47,7 @@ for part in content:
 ### Async Execution
 
 ```py
-input_stream = processor.stream_content([ProcessorPart(INPUT_PROMPT)])
-async for part in p(input_stream):
+async for part in p.stream_content([INPUT_PROMPT]):
   if part.text:
     print(part.text)
 ```
@@ -56,6 +70,7 @@ from typing import Any, Literal
 
 from genai_processors import content_api
 from genai_processors import processor
+from google.genai import _transformers
 from google.genai import types as genai_types
 import httpx
 from typing_extensions import TypedDict
@@ -113,13 +128,20 @@ class GenerateContentConfig(TypedDict, total=False):
   max_tokens: int | None
   """Maximum number of tokens to generate."""
 
-  response_format: dict[str, Any] | None
-  """Response format specification (e.g., {"type": "json_object"})"""
+  response_schema: genai_types.SchemaUnion | None
+  """The `Schema` object allows the definition of input and output data types.
+
+  These types can be objects, but also primitives and arrays.
+  Represents a select subset of an [OpenAPI 3.0 schema
+  object](https://spec.openapis.org/oas/v3.0.3#schema).
+  If set, a compatible response_mime_type must also be set.
+  Compatible mimetypes: `application/json`: Schema for JSON response.
+  """
 
   stop: list[str] | str | None
   """Stop sequences to end generation."""
 
-  tools: list[dict[str, Any]] | None
+  tools: list[genai_types.Tool] | None
   """Function calling tools available to the model."""
 
   tool_choice: str | dict[str, Any] | None
@@ -270,6 +292,44 @@ class OpenRouterModel(processor.Processor):
         timeout=_DEFAULT_TIMEOUT,
     )
 
+    # Initialize tools
+    if tools := self._config.get('tools'):
+      self._tools = []
+      for tool in tools:
+        for tool_name in (
+            'retrieval',
+            'google_search',
+            'google_search_retrieval',
+            'enterprise_web_search',
+            'google_maps',
+            'url_context',
+            'code_execution',
+            'computer_use',
+        ):
+          if getattr(tool, tool_name) is not None:
+            raise ValueError(f'Tool {tool_name} is not supported.')
+
+        for fdecl in tool.function_declarations or ():
+          if fdecl.parameters:
+            parameters = _transformers.t_schema(  # pytype: disable=wrong-arg-types
+                _FakeClient(), fdecl.parameters
+            ).json_schema.model_dump(
+                mode='json', exclude_unset=True
+            )
+          else:
+            parameters = None
+
+          self._tools.append({
+              'type': 'function',
+              'function': {
+                  'name': fdecl.name,
+                  'description': fdecl.description,
+                  'parameters': parameters,
+              },
+          })
+    else:
+      self._tools = None
+
   @property
   def key_prefix(self) -> str:
     """Key prefix for caching."""
@@ -311,93 +371,97 @@ class OpenRouterModel(processor.Processor):
 
     # Add configuration parameters
     for key, value in self._config.items():
-      if value is not None:
+      if key == 'response_schema' and value is not None:
+        # Convert genai_types.SchemaUnion to JSON schema for OpenRouter
+        schema_json = _transformers.t_schema(
+            _FakeClient(), value
+        ).json_schema.model_dump(mode='json', exclude_unset=True)
+        payload['response_format'] = {'type': 'json_object', 'schema': schema_json}
+      elif key not in ('response_schema', 'tools') and value is not None:
         payload[key] = value
 
-    try:
-      # Make streaming request
-      async with self._client.stream(
-          'POST',
-          '/chat/completions',
-          json=payload,
-      ) as response:
-        try:
-          response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-          error_body = await e.response.aread()
-          error_detail = self._parse_error_response(error_body)          
-          # Handle specific HTTP status codes with appropriate exceptions
-          if e.response.status_code == 401:
-            raise AuthenticationError(f"Invalid API key: {error_detail}") from e
-          elif e.response.status_code == 429:
-            retry_after = e.response.headers.get('Retry-After')
-            raise RateLimitError(
-                f"Rate limit exceeded. Retry after: {retry_after}s" if retry_after 
-                else "Rate limit exceeded"
-            ) from e
-          else:
-            raise OpenRouterAPIError(
-                f"API request failed ({e.response.status_code}): {error_detail}"
-            ) from e
+    # Add tools if available
+    if self._tools is not None:
+      payload['tools'] = self._tools
 
-        # Use aiter_lines for easier line processing
-        async for line in response.aiter_lines():
-          parsed = _parse_sse_line(line)
-          if not parsed:
-            continue
+    # Make streaming request
+    async with self._client.stream(
+        'POST',
+        '/chat/completions',
+        json=payload,
+    ) as response:
+      try:
+        response.raise_for_status()
+      except httpx.HTTPStatusError as e:
+        error_body = await e.response.aread()
+        error_detail = self._parse_error_response(error_body)          
+        # Handle specific HTTP status codes with appropriate exceptions
+        if e.response.status_code == 401:
+          raise AuthenticationError(f"Invalid API key: {error_detail}") from e
+        elif e.response.status_code == 429:
+          retry_after = e.response.headers.get('Retry-After')
+          raise RateLimitError(
+              f"Rate limit exceeded. Retry after: {retry_after}s" if retry_after 
+              else "Rate limit exceeded"
+          ) from e
+        else:
+          raise OpenRouterAPIError(
+              f"API request failed ({e.response.status_code}): {error_detail}"
+          ) from e
 
-          if parsed.get('type') == 'done':
-            break
+      # Use aiter_lines for easier line processing
+      async for line in response.aiter_lines():
+        parsed = _parse_sse_line(line)
+        if not parsed:
+          continue
 
-          # Extract content from the response
-          choices = parsed.get('choices', [])
-          if not choices:
-            continue
+        if parsed.get('type') == 'done':
+          break
 
-          choice = choices[0]
-          delta = choice.get('delta', {})
+        # Extract content from the response
+        choices = parsed.get('choices', [])
+        if not choices:
+          continue
 
-          # Handle content delta with walrus operator
-          if content := delta.get('content'):
+        choice = choices[0]
+        delta = choice.get('delta', {})
+
+        # Handle content delta with walrus operator
+        if content := delta.get('content'):
+          yield content_api.ProcessorPart(
+              content,
+              role='model',
+              metadata=self._build_metadata(parsed),
+          )
+
+        # Handle function calls
+        if 'function_call' in delta and delta['function_call']:
+          func_call = delta['function_call']
+          if 'name' in func_call or 'arguments' in func_call:
+            # For function calls, we need to accumulate the complete call
+            # This is a simplified version - in practice you might want to
+            # buffer function calls until complete
             yield content_api.ProcessorPart(
-                content,
+                genai_types.Part.from_function_call(
+                    name=func_call.get('name', ''),
+                    args=json.loads(func_call.get('arguments', '{}')),
+                ),
                 role='model',
                 metadata=self._build_metadata(parsed),
             )
 
-          # Handle function calls
-          if 'function_call' in delta and delta['function_call']:
-            func_call = delta['function_call']
-            if 'name' in func_call or 'arguments' in func_call:
-              # For function calls, we need to accumulate the complete call
-              # This is a simplified version - in practice you might want to
-              # buffer function calls until complete
-              yield content_api.ProcessorPart(
-                  genai_types.Part.from_function_call(
-                      name=func_call.get('name', ''),
-                      args=json.loads(func_call.get('arguments', '{}')),
-                  ),
-                  role='model',
-                  metadata=self._build_metadata(parsed),
-              )
-
-          # Handle finish reason - use end_of_turn instead of generation_complete
-          finish_reason = choice.get('finish_reason')
-          if finish_reason:
-            yield content_api.ProcessorPart(
-                '',
-                role='model',
-                metadata={
-                    **self._build_metadata(parsed),
-                    'finish_reason': finish_reason,
-                    'end_of_turn': True,
-                },
-            )
-
-    except Exception as e:
-      if not isinstance(e, (OpenRouterAPIError, AuthenticationError, RateLimitError)):
-        raise OpenRouterAPIError(f'OpenRouter request failed: {e}') from e
-      raise
+        # Handle finish reason - use end_of_turn instead of generation_complete
+        finish_reason = choice.get('finish_reason')
+        if finish_reason:
+          yield content_api.ProcessorPart(
+              '',
+              role='model',
+              metadata={
+                  **self._build_metadata(parsed),
+                  'finish_reason': finish_reason,
+                  'end_of_turn': True,
+              },
+          )
 
   def _build_metadata(self, response_data: dict[str, Any]) -> dict[str, Any]:
     """Build metadata from OpenRouter response."""
@@ -432,3 +496,10 @@ class OpenRouterModel(processor.Processor):
     """Async context manager exit - clean up HTTP client."""
     if hasattr(self, '_client') and self._client:
       await self._client.aclose()
+
+
+class _FakeClient:
+  """A fake genai client to invoke t_schema."""
+
+  def __init__(self):
+    self.vertexai = False

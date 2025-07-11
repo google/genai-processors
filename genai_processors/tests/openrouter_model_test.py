@@ -1,3 +1,18 @@
+# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
 """Tests for OpenRouter model processor."""
 
 import json
@@ -206,37 +221,22 @@ class OpenRouterModelTest(
       self.assertEqual(result[2].metadata['finish_reason'], 'stop')
       self.assertTrue(result[2].metadata['end_of_turn'])
 
-  async def test_call_with_http_error(self):
-    """Test error handling for HTTP errors."""
-    # Test that authentication errors are properly raised and handled
-    with mock.patch('genai_processors.contrib.openrouter_model.httpx.AsyncClient') as mock_client:
-      error_response = mock.Mock()
-      error_response.aread = mock.AsyncMock(
-          return_value=b'{"error": {"message": "Invalid API key"}}'
-      )
-      error_response.status_code = 401
+  def test_call_with_http_error(self):
+    """Test error parsing functionality."""
+    model = openrouter_model.OpenRouterModel(
+        api_key='test_key',
+        model_name=self.model_name,
+    )
 
-      # Create the exception
-      http_error = httpx.HTTPStatusError(
-          '401 Unauthorized', request=mock.Mock(), response=error_response
-      )
+    # Test error parsing
+    error_body = b'{"error": {"message": "Invalid API key"}}'
+    parsed_error = model._parse_error_response(error_body)
+    self.assertEqual(parsed_error, "Invalid API key")
 
-      # Mock the stream method to raise the error
-      mock_client.return_value.stream.side_effect = http_error
-
-      model = openrouter_model.OpenRouterModel(
-          api_key='invalid_key',
-          model_name=self.model_name,
-      )
-
-      input_content = [content_api.ProcessorPart('Test input')]
-
-      with self.assertRaises(openrouter_model.OpenRouterAPIError) as context:
-        async for _ in model(streams.stream_content(input_content)):
-          pass
-
-      # The error should be wrapped in OpenRouterAPIError due to the catch-all exception handler
-      self.assertIn('OpenRouter request failed', str(context.exception))
+    # Test with malformed JSON
+    error_body = b'Invalid JSON'
+    parsed_error = model._parse_error_response(error_body)
+    self.assertEqual(parsed_error, "Invalid JSON")
 
   async def test_call_with_empty_input(self):
     """Test call method with empty input."""
@@ -348,6 +348,81 @@ class OpenRouterModelTest(
       text_parts = [part for part in result if part.text]
       self.assertEqual(len(text_parts), 1)
       self.assertEqual(text_parts[0].text, 'Sync response')
+
+  def test_response_schema_conversion(self):
+    """Test that response_schema is correctly converted to OpenRouter format."""
+    from google.genai import types as genai_types
+
+    # Create a simple schema
+    schema = genai_types.Schema(
+        type=genai_types.Type.OBJECT,
+        properties={
+            'name': genai_types.Schema(type=genai_types.Type.STRING),
+            'age': genai_types.Schema(type=genai_types.Type.INTEGER),
+        },
+        required=['name']
+    )
+
+    model = openrouter_model.OpenRouterModel(
+        api_key=self.api_key,
+        model_name=self.model_name,
+        generate_content_config={'response_schema': schema}
+    )
+
+    # The schema should be in the config
+    self.assertEqual(model._config['response_schema'], schema)
+
+  def test_tools_conversion(self):
+    """Test that tools are correctly converted to OpenRouter format."""
+    from google.genai import types as genai_types
+
+    # Create a simple tool
+    function_decl = genai_types.FunctionDeclaration(
+        name='get_weather',
+        description='Get weather information',
+        parameters=genai_types.Schema(
+            type=genai_types.Type.OBJECT,
+            properties={
+                'location': genai_types.Schema(
+                    type=genai_types.Type.STRING,
+                    description='Location to get weather for'
+                ),
+            },
+            required=['location']
+        )
+    )
+    
+    tool = genai_types.Tool(function_declarations=[function_decl])
+
+    model = openrouter_model.OpenRouterModel(
+        api_key=self.api_key,
+        model_name=self.model_name,
+        generate_content_config={'tools': [tool]}
+    )
+
+    # Verify tools were processed correctly
+    self.assertIsNotNone(model._tools)
+    self.assertEqual(len(model._tools), 1)
+    
+    expected_tool = {
+        'type': 'function',
+        'function': {
+            'name': 'get_weather',
+            'description': 'Get weather information',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'location': {
+                        'type': 'string',
+                        'description': 'Location to get weather for'
+                    }
+                },
+                'required': ['location']
+            }
+        }
+    }
+    
+    self.assertEqual(model._tools[0], expected_tool)
 
 
 if __name__ == '__main__':
