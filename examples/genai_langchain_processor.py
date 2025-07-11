@@ -9,7 +9,7 @@ Demonstrates how to use GenaiLangChainProcessor for:
 import asyncio
 import requests
 
-from genai_processors.contrib import GenAILangChainProcessor
+from genai_processors.contrib.genai_langchain_streaming import GenAILangChainProcessor
 from genai_processors import streams
 from genai_processors.content_api import ProcessorContent, ProcessorPart
 from langchain.tools import tool

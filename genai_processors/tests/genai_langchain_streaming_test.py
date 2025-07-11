@@ -3,7 +3,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.tools import tool
 
 from genai_processors import content_api
-from genai_processors.contrib import GenAILangChainProcessor
+from genai_processors.contrib.genai_langchain_streaming import GenAILangChainProcessor
 
 class MockLLM:
     """Mock ChatGoogleGenerativeAI for testing"""
