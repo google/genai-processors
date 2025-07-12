@@ -1,8 +1,8 @@
 # How to Contribute
 
 We welcome contributions of new Processors that can be shared with the
-community. Please add your new Processors under the [`contrib/`](contrib)
-folder.
+community. Please add your new Processors under the
+[`contrib/`](genai_processors/contrib) folder.
 
 ## Contributor License Agreement
 
