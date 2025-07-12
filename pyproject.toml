@@ -49,7 +49,6 @@ repository = "https://github.com/google-gemini/genai-processors"
 # include them in the main dependency list. But they can be installed with
 # `pip install -e .[contrib]`
 contrib = [
-    "httpx>=0.24.0",
 ]
 # Development deps (unittest, linting, formating,...)
 # Installed through `pip install -e .[dev]`
