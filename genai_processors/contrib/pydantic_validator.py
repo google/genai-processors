@@ -120,25 +120,46 @@ class PydanticValidator(processor.PartProcessor):
                 return None
         return None
 
+    def _create_part_with_merged_metadata(
+        self,
+        content: str,
+        mimetype: str,
+        original_part: processor.ProcessorPart,
+        additional_metadata: dict[str, Any],
+    ) -> processor.ProcessorPart:
+        """Helper to create a ProcessorPart with merged metadata."""
+        return processor.ProcessorPart(
+            content,
+            mimetype=mimetype,
+            metadata={**original_part.metadata, **additional_metadata},
+        )
+
     async def _handle_success(
         self, validated_data: BaseModel, original_part: processor.ProcessorPart
     ) -> AsyncIterable[processor.ProcessorPart]:
-        """Yields parts for a successful validation."""
+        """Yields parts for a successful validation.
+
+        We store Pydantic instance in metadata for downstream processors.
+        This may cause serialization issues if metadata is later serialized.
+        The instance provides convenient access to validated data with proper
+        types.
+
+        """
         # Store the validated data as JSON text
         validated_json_text = json.dumps(validated_data.model_dump(), indent=2)
 
-        validated_part = processor.ProcessorPart(
+        # Include the validated instance in metadata for convenience
+        success_metadata = {
+            "validation_status": "success",
+            "validated_model": self.model.__name__,
+            "validated_instance": validated_data,  # Live Pydantic instance
+        }
+
+        validated_part = self._create_part_with_merged_metadata(
             validated_json_text,
-            mimetype=(
-                f'application/json; validated_model={self.model.__name__}'
-            ),
-            metadata={
-                **original_part.metadata,
-                "validation_status": "success",
-                "validated_model": self.model.__name__,
-                # Store the actual Pydantic instance
-                "validated_instance": validated_data,
-            },
+            f'application/json; validated_model={self.model.__name__}',
+            original_part,
+            success_metadata,
         )
         yield validated_part
         yield processor.status(
@@ -161,14 +182,15 @@ class PydanticValidator(processor.PartProcessor):
 
         error_details = {
             "validation_status": "failure",
-            "validation_model": self.model.__name__,
+            "validated_model": self.model.__name__,
             "validation_errors": error.errors(),
             "original_data": raw_data,
         }
-        failed_part = processor.ProcessorPart(
+        failed_part = self._create_part_with_merged_metadata(
             original_part.text,  # Preserve original text
-            mimetype=original_part.mimetype,
-            metadata={**original_part.metadata, **error_details},
+            original_part.mimetype,
+            original_part,
+            error_details,
         )
         yield failed_part
 

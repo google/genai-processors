@@ -48,7 +48,7 @@ class Product(BaseModel):
 class TestPydanticValidator:
     """Test suite for PydanticValidator."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_successful_validation(self):
         """Test that valid data passes validation."""
         validator = PydanticValidator(UserProfile)
@@ -82,7 +82,7 @@ class TestPydanticValidator:
         assert status_part.substream_name == processor.STATUS_STREAM
         assert "Successfully validated" in status_part.text
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_failed_validation_permissive_mode(self):
         """Test invalid data fails validation gracefully in permissive mode."""
         validator = PydanticValidator(UserProfile)
@@ -111,7 +111,7 @@ class TestPydanticValidator:
         assert "validation_errors" in failed_part.metadata
         assert "original_data" in failed_part.metadata
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_failed_validation_strict_mode(self):
         """Test that validation errors are raised in fail-fast mode."""
         config = ValidationConfig(fail_on_error=True)
@@ -127,7 +127,7 @@ class TestPydanticValidator:
             async for result_part in validator(part):
                 results.append(result_part)
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_passthrough_for_non_json_parts(self):
         """Test parts without JSON content are passed through unchanged."""
         validator = PydanticValidator(UserProfile)
@@ -143,7 +143,7 @@ class TestPydanticValidator:
         assert "validation_status" not in result_part.metadata
         assert result_part.text == "This is just a text part."
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_strict_mode_validation(self):
         """Test strict mode validation with more rigorous type checking."""
         config = ValidationConfig(strict_mode=True)
@@ -167,6 +167,38 @@ class TestPydanticValidator:
         assert "Validation failed" in status_part.text
         assert failed_part.metadata["validation_status"] == "failure"
 
+    @pytest.mark.anyio
+    async def test_strict_mode_accepts_valid_types(self):
+        """Test that strict mode accepts correctly typed data."""
+        config = ValidationConfig(strict_mode=True)
+        validator = PydanticValidator(Product, config=config)
+
+        # Data with correct types that should pass even in strict mode
+        valid_data = {"id": 123, "name": "Test Product", "price": 19.99}
+        part = ProcessorPart(
+            json.dumps(valid_data),
+            mimetype='application/json'
+        )
+
+        results = []
+        async for result_part in validator(part):
+            results.append(result_part)
+
+        # Should have: validated part + status message
+        assert len(results) == 2
+        validated_part = results[0]
+        status_part = results[1]
+
+        # Check successful validation
+        assert validated_part.metadata["validation_status"] == "success"
+        assert "Successfully validated" in status_part.text
+
+        # Verify the validated instance
+        validated_instance = validated_part.metadata["validated_instance"]
+        assert isinstance(validated_instance, Product)
+        assert validated_instance.id == 123
+        assert validated_instance.price == 19.99
+
     def test_match_function(self):
         """Test the match function correctly identifies processable parts."""
         validator = PydanticValidator(UserProfile)
@@ -186,7 +218,15 @@ class TestPydanticValidator:
         text_part = ProcessorPart("just text")
         assert validator.match(text_part) is False
 
-    @pytest.mark.asyncio
+        # Should match parts with JSON mimetype even if JSON is invalid
+        # (validation failure will be handled in call(), not match())
+        invalid_json_part = ProcessorPart(
+            "invalid json {",
+            mimetype='application/json'
+        )
+        assert validator.match(invalid_json_part) is True
+
+    @pytest.mark.anyio
     async def test_invalid_json_handling(self):
         """Test handling of invalid JSON in text field."""
         validator = PydanticValidator(UserProfile)

@@ -1,4 +1,4 @@
-# **PydanticValidator**
+# PydanticValidator
 
 The PydanticValidator is a PartProcessor that validates the JSON content of a ProcessorPart against a specified [Pydantic](https://docs.pydantic.dev/latest/) model. It provides a simple, declarative way to enforce data schemas and improve the robustness of your AI pipelines.
 
@@ -13,15 +13,21 @@ In many AI applications, processors ingest data from external sources like user 
 ## **Installation**
 
 The processor requires the pydantic library. To use it, install the optional dependencies for this processor using the [pydantic] extra:
+
+```bash
 pip install "genai_processors[pydantic]"
+```
 
 ## **Configuration**
 
 You can customize the validator's behavior by passing a ValidationConfig object during initialization.
+
+```python
 from genai_processors.contrib.pydantic_validator import PydanticValidator, ValidationConfig
 
 config = ValidationConfig(fail_on_error=True, strict_mode=True)
 validator = PydanticValidator(MyModel, config=config)
+```
 
 **ValidationConfig Parameters:**
 
