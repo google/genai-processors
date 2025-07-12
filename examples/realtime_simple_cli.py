@@ -74,7 +74,7 @@ INSTRUCTION_PARTS = [
     ' explain interesting facts related to what you see and hear, predict what'
     ' could happen, judge some actions or reactions, etc. Respond to the'
     ' user in a few sentences maximum: keep it short and engaging. Avoid'
-    ' long monologues. You can use Google search to add extra inforamtion to'
+    ' long monologues. You can use Google search to add extra information to'
     ' the user questions or to come up with interesting news or facts.'
 ]
 
