@@ -35,6 +35,7 @@ class OpenRouterModelTest(
 
   def setUp(self):
     """Set up test fixtures."""
+    super().setUp()
     self.api_key = 'test_api_key'
     self.model_name = 'openai/gpt-4o'
     self.base_config = {
@@ -160,9 +161,18 @@ class OpenRouterModelTest(
   async def test_call_with_mock_response(self):
     """Test the call method with mocked HTTP response."""
     mock_response_data = [
-        'data: {"choices": [{"delta": {"content": "Hello"}}], "model": "openai/gpt-4o"}',
-        'data: {"choices": [{"delta": {"content": " world"}}], "model": "openai/gpt-4o"}',
-        'data: {"choices": [{"finish_reason": "stop"}], "model": "openai/gpt-4o"}',
+        (
+            'data: {"choices": [{"delta": {"content": "Hello"}}], "model":'
+            ' "openai/gpt-4o"}'
+        ),
+        (
+            'data: {"choices": [{"delta": {"content": " world"}}], "model":'
+            ' "openai/gpt-4o"}'
+        ),
+        (
+            'data: {"choices": [{"finish_reason": "stop"}], "model":'
+            ' "openai/gpt-4o"}'
+        ),
         'data: [DONE]',
     ]
 
@@ -197,7 +207,7 @@ class OpenRouterModelTest(
       async for part in model(streams.stream_content(input_content)):
         result.append(part)
 
-      # Verify the request was made correctly
+      # Verify the request was made correctly.
       mock_stream.assert_called_once()
       call_args = mock_stream.call_args
       self.assertEqual(call_args[0][0], 'POST')
@@ -213,8 +223,9 @@ class OpenRouterModelTest(
       self.assertEqual(request_json['temperature'], 0.7)
       self.assertEqual(request_json['max_tokens'], 100)
 
-      # Verify the response processing
-      self.assertEqual(len(result), 3)  # Two content chunks + finish reason
+      # Verify the response processing.
+      # Two content chunks + finish reason.
+      self.assertEqual(len(result), 3)  # pylint: disable=g-generic-assert
       self.assertEqual(result[0].text, 'Hello')
       self.assertEqual(result[1].text, ' world')
       self.assertEqual(result[2].text, '')
@@ -228,15 +239,15 @@ class OpenRouterModelTest(
         model_name=self.model_name,
     )
 
-    # Test error parsing
+    # Test error parsing.
     error_body = b'{"error": {"message": "Invalid API key"}}'
     parsed_error = model._parse_error_response(error_body)
-    self.assertEqual(parsed_error, "Invalid API key")
+    self.assertEqual(parsed_error, 'Invalid API key')
 
-    # Test with malformed JSON
+    # Test with malformed JSON.
     error_body = b'Invalid JSON'
     parsed_error = model._parse_error_response(error_body)
-    self.assertEqual(parsed_error, "Invalid JSON")
+    self.assertEqual(parsed_error, 'Invalid JSON')
 
   async def test_call_with_empty_input(self):
     """Test call method with empty input."""
@@ -245,14 +256,9 @@ class OpenRouterModelTest(
         model_name=self.model_name,
     )
 
-    # Empty input should return immediately without making API calls
-    input_content = []
-    result = []
-
-    async for part in model(streams.stream_content(input_content)):
-      result.append(part)
-
-    self.assertEqual(len(result), 0)
+    # Empty input should return immediately without making API calls.
+    result = await processor.apply_async(model, [])
+    self.assertEqual(result, [])
 
   def test_build_metadata(self):
     """Test metadata building from response data."""
@@ -307,7 +313,7 @@ class OpenRouterModelTest(
 
     with mock.patch.object(model._client, 'aclose') as mock_aclose:
       async with model:
-        pass  # Just test the context manager works
+        pass  # Just test the context manager works.
       mock_aclose.assert_called_once()
 
   def test_apply_sync_integration(self):
@@ -344,39 +350,35 @@ class OpenRouterModelTest(
       input_content = [content_api.ProcessorPart('Test sync input')]
       result = processor.apply_sync(model, input_content)
 
-      # Should get the content response
+      # Should get the content response.
       text_parts = [part for part in result if part.text]
-      self.assertEqual(len(text_parts), 1)
+      self.assertEqual(len(text_parts), 1)  # pylint: disable=g-generic-assert
       self.assertEqual(text_parts[0].text, 'Sync response')
 
   def test_response_schema_conversion(self):
     """Test that response_schema is correctly converted to OpenRouter format."""
-    from google.genai import types as genai_types
-
-    # Create a simple schema
+    # Create a simple schema.
     schema = genai_types.Schema(
         type=genai_types.Type.OBJECT,
         properties={
             'name': genai_types.Schema(type=genai_types.Type.STRING),
             'age': genai_types.Schema(type=genai_types.Type.INTEGER),
         },
-        required=['name']
+        required=['name'],
     )
 
     model = openrouter_model.OpenRouterModel(
         api_key=self.api_key,
         model_name=self.model_name,
-        generate_content_config={'response_schema': schema}
+        generate_content_config={'response_schema': schema},
     )
 
-    # The schema should be in the config
+    # The schema should be in the config.
     self.assertEqual(model._config['response_schema'], schema)
 
   def test_tools_conversion(self):
     """Test that tools are correctly converted to OpenRouter format."""
-    from google.genai import types as genai_types
-
-    # Create a simple tool
+    # Create a simple tool.
     function_decl = genai_types.FunctionDeclaration(
         name='get_weather',
         description='Get weather information',
@@ -385,25 +387,25 @@ class OpenRouterModelTest(
             properties={
                 'location': genai_types.Schema(
                     type=genai_types.Type.STRING,
-                    description='Location to get weather for'
+                    description='Location to get weather for',
                 ),
             },
-            required=['location']
-        )
+            required=['location'],
+        ),
     )
-    
+
     tool = genai_types.Tool(function_declarations=[function_decl])
 
     model = openrouter_model.OpenRouterModel(
         api_key=self.api_key,
         model_name=self.model_name,
-        generate_content_config={'tools': [tool]}
+        generate_content_config={'tools': [tool]},
     )
 
-    # Verify tools were processed correctly
+    # Verify tools were processed correctly.
     self.assertIsNotNone(model._tools)
-    self.assertEqual(len(model._tools), 1)
-    
+    self.assertEqual(len(model._tools), 1)  # pylint: disable=g-generic-assert
+
     expected_tool = {
         'type': 'function',
         'function': {
@@ -414,14 +416,14 @@ class OpenRouterModelTest(
                 'properties': {
                     'location': {
                         'type': 'string',
-                        'description': 'Location to get weather for'
+                        'description': 'Location to get weather for',
                     }
                 },
-                'required': ['location']
-            }
-        }
+                'required': ['location'],
+            },
+        },
     }
-    
+
     self.assertEqual(model._tools[0], expected_tool)
 
 

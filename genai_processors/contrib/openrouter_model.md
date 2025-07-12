@@ -1,6 +1,8 @@
 ### OpenRouter Model (`openrouter_model.py`)
 
-The OpenRouter processor provides access to hundreds of AI models through OpenRouter's unified API, including models from OpenAI, Anthropic, Google, Meta, and many other providers.
+The OpenRouter processor provides access to hundreds of AI models through
+OpenRouter's unified API, including models from OpenAI, Anthropic, Google, Meta,
+and many other providers.
 
 #### Features
 
@@ -111,7 +113,8 @@ model = OpenRouterModel(
 
 #### Example Applications
 
-Check out the example script at `examples/openrouter_example.py` for comprehensive demonstrations including:
+Check out the example script at `examples/openrouter_example.py` for
+comprehensive demonstrations including:
 
 - Basic chat interactions
 - Multi-turn conversations

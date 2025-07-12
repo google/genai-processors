@@ -64,6 +64,7 @@ OpenRouter provides access to hundreds of models including:
 For a complete list, visit: https://openrouter.ai/models
 """
 
+import base64
 from collections.abc import AsyncIterable
 import json
 from typing import Any, Literal
@@ -82,16 +83,19 @@ _DEFAULT_TIMEOUT = 300
 
 class OpenRouterAPIError(Exception):
   """Base exception for OpenRouter API errors."""
+
   pass
 
 
 class AuthenticationError(OpenRouterAPIError):
   """Raised when API authentication fails."""
+
   pass
 
 
 class RateLimitError(OpenRouterAPIError):
   """Raised when API rate limit is exceeded."""
+
   pass
 
 
@@ -169,7 +173,7 @@ def _to_openrouter_message(
   """Convert ProcessorPart to OpenRouter message format."""
   role = part.role.lower() if part.role else default_role
 
-  # Handle function calls
+  # Handle function calls.
   if part.function_call:
     return {
         'role': part.role.lower(),
@@ -179,7 +183,7 @@ def _to_openrouter_message(
         },
     }
 
-  # Handle function responses
+  # Handle function responses.
   if part.function_response:
     return {
         'role': 'function',
@@ -187,33 +191,29 @@ def _to_openrouter_message(
         'content': json.dumps(part.function_response.response),
     }
 
-  # Handle text content
+  # Handle text content.
   if content_api.is_text(part.mimetype):
     return {
         'role': role,
         'content': part.text,
     }
 
-  # Handle multimodal content
+  # Handle multimodal content.
   if content_api.is_image(part.mimetype):
-    # Convert image to base64 for OpenRouter
-    import base64
-
+    # Convert image to base64 for OpenRouter.
     if part.bytes:
       encoded_image = base64.b64encode(part.bytes).decode('utf-8')
       return {
           'role': role,
-          'content': [
-              {
-                  'type': 'image_url',
-                  'image_url': {
-                      'url': f'data:{part.mimetype};base64,{encoded_image}'
-                  },
-              }
-          ],
+          'content': [{
+              'type': 'image_url',
+              'image_url': {
+                  'url': f'data:{part.mimetype};base64,{encoded_image}'
+              },
+          }],
       }
 
-  # Fail verbosely for unsupported types
+  # Fail verbosely for unsupported types.
   raise ValueError(f'Unsupported Part type: {part.mimetype}')
 
 
@@ -221,17 +221,17 @@ def _parse_sse_line(line: str) -> dict[str, Any] | None:
   """Parse a Server-Sent Events line."""
   line = line.strip()
 
-  # Skip comments and empty lines
+  # Skip comments and empty lines.
   if not line or line.startswith(':'):
     return None
 
-  # Parse data lines
+  # Parse data lines.
   if line.startswith('data: '):
     data = line[6:]
     if data == '[DONE]':
       return {'type': 'done'}
 
-    # Let JSON errors propagate - don't suppress them
+    # Let JSON errors propagate - don't suppress them.
     return json.loads(data)
 
   return None
@@ -258,8 +258,10 @@ class OpenRouterModel(processor.Processor):
 
     Args:
       api_key: Your OpenRouter API key.
-      model_name: Model to use (e.g., "openai/gpt-4o", "anthropic/claude-3-5-sonnet").
-      base_url: OpenRouter API base URL (defaults to https://openrouter.ai/api/v1).
+      model_name: Model to use (e.g., "openai/gpt-4o",
+        "anthropic/claude-3-5-sonnet").
+      base_url: OpenRouter API base URL (defaults to
+        https://openrouter.ai/api/v1).
       site_url: Your site URL (optional, for OpenRouter rankings).
       site_name: Your site name (optional, for OpenRouter rankings).
       generate_content_config: Model configuration parameters.
@@ -274,7 +276,7 @@ class OpenRouterModel(processor.Processor):
     self._site_name = site_name
     self._config = generate_content_config or {}
 
-    # Build headers
+    # Build headers.
     headers = {
         'Authorization': f'Bearer {self._api_key}',
         'Content-Type': 'application/json',
@@ -292,7 +294,7 @@ class OpenRouterModel(processor.Processor):
         timeout=_DEFAULT_TIMEOUT,
     )
 
-    # Initialize tools
+    # Initialize tools.
     if tools := self._config.get('tools'):
       self._tools = []
       for tool in tools:
@@ -346,8 +348,11 @@ class OpenRouterModel(processor.Processor):
     """
     try:
       error_data = json.loads(error_body)
-      # OpenRouter typically returns errors in {"error": {"message": "..."}} format
-      return error_data.get('error', {}).get('message', error_body.decode('utf-8'))
+      # OpenRouter typically returns errors in {"error": {"message": "..."}}
+      # format.
+      return error_data.get('error', {}).get(
+          'message', error_body.decode('utf-8')
+      )
     except (json.JSONDecodeError, UnicodeDecodeError):
       return error_body.decode('utf-8', errors='replace')
 
@@ -362,29 +367,32 @@ class OpenRouterModel(processor.Processor):
     if not messages:
       return
 
-    # Prepare request payload
+    # Prepare request payload.
     payload = {
         'model': self._model_name,
         'messages': messages,
-        'stream': True,  # Always stream
+        'stream': True,
     }
 
-    # Add configuration parameters
+    # Add configuration parameters.
     for key, value in self._config.items():
       if key == 'response_schema' and value is not None:
-        # Convert genai_types.SchemaUnion to JSON schema for OpenRouter
+        # Convert genai_types.SchemaUnion to JSON schema for OpenRouter.
         schema_json = _transformers.t_schema(
             _FakeClient(), value
         ).json_schema.model_dump(mode='json', exclude_unset=True)
-        payload['response_format'] = {'type': 'json_object', 'schema': schema_json}
+        payload['response_format'] = {
+            'type': 'json_object',
+            'schema': schema_json,
+        }
       elif key not in ('response_schema', 'tools') and value is not None:
         payload[key] = value
 
-    # Add tools if available
+    # Add tools if available.
     if self._tools is not None:
       payload['tools'] = self._tools
 
-    # Make streaming request
+    # Make streaming request.
     async with self._client.stream(
         'POST',
         '/chat/completions',
@@ -394,22 +402,23 @@ class OpenRouterModel(processor.Processor):
         response.raise_for_status()
       except httpx.HTTPStatusError as e:
         error_body = await e.response.aread()
-        error_detail = self._parse_error_response(error_body)          
-        # Handle specific HTTP status codes with appropriate exceptions
+        error_detail = self._parse_error_response(error_body)
+        # Handle specific HTTP status codes with appropriate exceptions.
         if e.response.status_code == 401:
-          raise AuthenticationError(f"Invalid API key: {error_detail}") from e
+          raise AuthenticationError(f'Invalid API key: {error_detail}') from e
         elif e.response.status_code == 429:
           retry_after = e.response.headers.get('Retry-After')
           raise RateLimitError(
-              f"Rate limit exceeded. Retry after: {retry_after}s" if retry_after 
-              else "Rate limit exceeded"
+              f'Rate limit exceeded. Retry after: {retry_after}s'
+              if retry_after
+              else 'Rate limit exceeded'
           ) from e
         else:
           raise OpenRouterAPIError(
-              f"API request failed ({e.response.status_code}): {error_detail}"
+              f'API request failed ({e.response.status_code}): {error_detail}'
           ) from e
 
-      # Use aiter_lines for easier line processing
+      # Use aiter_lines for easier line processing.
       async for line in response.aiter_lines():
         parsed = _parse_sse_line(line)
         if not parsed:
@@ -418,7 +427,7 @@ class OpenRouterModel(processor.Processor):
         if parsed.get('type') == 'done':
           break
 
-        # Extract content from the response
+        # Extract content from the response.
         choices = parsed.get('choices', [])
         if not choices:
           continue
@@ -426,7 +435,7 @@ class OpenRouterModel(processor.Processor):
         choice = choices[0]
         delta = choice.get('delta', {})
 
-        # Handle content delta with walrus operator
+        # Handle content delta with walrus operator.
         if content := delta.get('content'):
           yield content_api.ProcessorPart(
               content,
@@ -434,13 +443,13 @@ class OpenRouterModel(processor.Processor):
               metadata=self._build_metadata(parsed),
           )
 
-        # Handle function calls
+        # Handle function calls.
         if 'function_call' in delta and delta['function_call']:
           func_call = delta['function_call']
           if 'name' in func_call or 'arguments' in func_call:
-            # For function calls, we need to accumulate the complete call
+            # For function calls, we need to accumulate the complete call.
             # This is a simplified version - in practice you might want to
-            # buffer function calls until complete
+            # buffer function calls until complete.
             yield content_api.ProcessorPart(
                 genai_types.Part.from_function_call(
                     name=func_call.get('name', ''),
@@ -450,7 +459,7 @@ class OpenRouterModel(processor.Processor):
                 metadata=self._build_metadata(parsed),
             )
 
-        # Handle finish reason - use end_of_turn instead of generation_complete
+        # Handle finish reason - use end_of_turn instead of generation_complete.
         finish_reason = choice.get('finish_reason')
         if finish_reason:
           yield content_api.ProcessorPart(
@@ -467,15 +476,15 @@ class OpenRouterModel(processor.Processor):
     """Build metadata from OpenRouter response."""
     metadata = {}
 
-    # Add usage information if available
+    # Add usage information if available.
     if 'usage' in response_data:
       metadata['usage'] = response_data['usage']
 
-    # Add model information
+    # Add model information.
     if 'model' in response_data:
       metadata['model'] = response_data['model']
 
-    # Add OpenRouter-specific metadata
+    # Add OpenRouter-specific metadata.
     if 'id' in response_data:
       metadata['request_id'] = response_data['id']
 
