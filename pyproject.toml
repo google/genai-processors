@@ -28,6 +28,7 @@ dependencies = [
     "google-api-python-client>=0.6.0",
     "google-cloud-texttospeech>=2.27.0",
     "google-cloud-speech>=2.33.0",
+    "httpx>=0.24.0",
     "jinja2>=3.0.0",
     "langchain==0.3.26",
     "langchain-core==0.3.68",
