@@ -26,8 +26,8 @@ To install the dependencies for this script, run:
 pip install --upgrade pyaudio genai-processors google-genai termcolor
 ```
 
-Before running this script, ensure the `GOOGLE_API_KEY` environment
-variable is set to the api-key you obtained from Google AI Studio.
+Before running this script, ensure the `GOOGLE_API_KEY` and `GOOGLE_PROJECT_ID` environment
+variable are set to the api-key you obtained from Google AI Studio.
 
 Important: **Use headphones**. This script uses the system default audio
 input and output, which often won't include echo cancellation. So to prevent
