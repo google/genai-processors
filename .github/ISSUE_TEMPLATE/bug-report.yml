@@ -1,5 +1,5 @@
 name: Bug Report
-description: File a bug report to help us improve Trae Agent
+description: File a bug report to help us improve Gemini Processors
 title: "[Bug]: "
 labels: ["type/bug", "status/need_triage"]
 body:
