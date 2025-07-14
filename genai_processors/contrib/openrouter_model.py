@@ -81,24 +81,6 @@ _DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1'
 _DEFAULT_TIMEOUT = 300
 
 
-class OpenRouterAPIError(Exception):
-  """Base exception for OpenRouter API errors."""
-
-  pass
-
-
-class AuthenticationError(OpenRouterAPIError):
-  """Raised when API authentication fails."""
-
-  pass
-
-
-class RateLimitError(OpenRouterAPIError):
-  """Raised when API rate limit is exceeded."""
-
-  pass
-
-
 class GenerateContentConfig(TypedDict, total=False):
   """Optional model configuration parameters for OpenRouter."""
 
@@ -403,22 +385,10 @@ class OpenRouterModel(processor.Processor):
       except httpx.HTTPStatusError as e:
         error_body = await e.response.aread()
         error_detail = self._parse_error_response(error_body)
-        # Handle specific HTTP status codes with appropriate exceptions.
-        if e.response.status_code == 401:
-          raise AuthenticationError(f'Invalid API key: {error_detail}') from e
-        elif e.response.status_code == 429:
-          retry_after = e.response.headers.get('Retry-After')
-          raise RateLimitError(
-              f'Rate limit exceeded. Retry after: {retry_after}s'
-              if retry_after
-              else 'Rate limit exceeded'
-          ) from e
-        else:
-          raise OpenRouterAPIError(
-              f'API request failed ({e.response.status_code}): {error_detail}'
-          ) from e
+        raise httpx.HTTPStatusError(
+            f'{e}: {error_detail}', request=e.request, response=e.response
+        )
 
-      # Use aiter_lines for easier line processing.
       async for line in response.aiter_lines():
         parsed = _parse_sse_line(line)
         if not parsed:
@@ -435,7 +405,6 @@ class OpenRouterModel(processor.Processor):
         choice = choices[0]
         delta = choice.get('delta', {})
 
-        # Handle content delta with walrus operator.
         if content := delta.get('content'):
           yield content_api.ProcessorPart(
               content,
@@ -443,25 +412,21 @@ class OpenRouterModel(processor.Processor):
               metadata=self._build_metadata(parsed),
           )
 
-        # Handle function calls.
-        if 'function_call' in delta and delta['function_call']:
-          func_call = delta['function_call']
-          if 'name' in func_call or 'arguments' in func_call:
+        if function_call := delta.get('function_call'):
+          if 'name' in function_call or 'arguments' in function_call:
             # For function calls, we need to accumulate the complete call.
             # This is a simplified version - in practice you might want to
             # buffer function calls until complete.
             yield content_api.ProcessorPart(
                 genai_types.Part.from_function_call(
-                    name=func_call.get('name', ''),
-                    args=json.loads(func_call.get('arguments', '{}')),
+                    name=function_call.get('name', ''),
+                    args=json.loads(function_call.get('arguments', '{}')),
                 ),
                 role='model',
                 metadata=self._build_metadata(parsed),
             )
 
-        # Handle finish reason - use end_of_turn instead of generation_complete.
-        finish_reason = choice.get('finish_reason')
-        if finish_reason:
+        if finish_reason := choice.get('finish_reason'):
           yield content_api.ProcessorPart(
               '',
               role='model',
@@ -476,15 +441,12 @@ class OpenRouterModel(processor.Processor):
     """Build metadata from OpenRouter response."""
     metadata = {}
 
-    # Add usage information if available.
     if 'usage' in response_data:
       metadata['usage'] = response_data['usage']
 
-    # Add model information.
     if 'model' in response_data:
       metadata['model'] = response_data['model']
 
-    # Add OpenRouter-specific metadata.
     if 'id' in response_data:
       metadata['request_id'] = response_data['id']
 
