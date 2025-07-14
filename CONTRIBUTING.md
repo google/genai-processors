@@ -25,6 +25,26 @@ use GitHub pull requests for this process.
 For more information on using pull requests, please consult
 [GitHub Help](https://help.github.com/articles/about-pull-requests/).
 
+If you would prefer to have more flexibility and avoid bandwidth of GenAI
+Processors maintainers becoming a bottleneck, consider keeping you processor in
+a separate repository. We would be happy to add a link to your repository from
+[contrib/README.md](genai_processors/contrib/README.md) to increase visibility.
+
+## File structure
+
+Please use the following file structure:
+
+ * genai_processors/contrib/
+   * **your_processor.py** - Implementation of the processor.
+   * **your_processor.md** - Documentation.
+   * tests/
+     * **your_processor_test.py** - Tests.
+
+If your processor is more complex and would benefit from being split into
+several files, you can create a `genai_processors/contrib/your_processor/`
+sub-directotry. Also consider hosting it in a separate repository and adding a
+link instead.
+
 ## Community Guidelines
 
 This project adheres to
