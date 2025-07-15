@@ -403,28 +403,26 @@ class OpenRouterModelTest(
     )
 
     # Verify tools were processed correctly.
-    self.assertIsNotNone(model._tools)
-    self.assertEqual(len(model._tools), 1)  # pylint: disable=g-generic-assert
-
-    expected_tool = {
-        'type': 'function',
-        'function': {
-            'name': 'get_weather',
-            'description': 'Get weather information',
-            'parameters': {
-                'type': 'object',
-                'properties': {
-                    'location': {
-                        'type': 'string',
-                        'description': 'Location to get weather for',
-                    }
+    self.assertEqual(
+        model._payload_args['tools'],
+        [{
+            'type': 'function',
+            'function': {
+                'name': 'get_weather',
+                'description': 'Get weather information',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'location': {
+                            'type': 'string',
+                            'description': 'Location to get weather for',
+                        }
+                    },
+                    'required': ['location'],
                 },
-                'required': ['location'],
             },
-        },
-    }
-
-    self.assertEqual(model._tools[0], expected_tool)
+        }],
+    )
 
 
 if __name__ == '__main__':

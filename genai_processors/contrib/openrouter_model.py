@@ -269,10 +269,11 @@ class OpenRouterModel(processor.Processor):
         timeout=_DEFAULT_TIMEOUT,
     )
 
-    # Initialize tools.
+    # Add configuration parameters.
+    self._payload_args = {}
+
     if tools := self._config.get('tools'):
       tool_utils.raise_for_gemini_server_side_tools(tools)
-      self._tools = []
       for tool in tools:
         for fdecl in tool.function_declarations or ():
           if fdecl.parameters:
@@ -282,7 +283,7 @@ class OpenRouterModel(processor.Processor):
           else:
             parameters = None
 
-          self._tools.append({
+          tools = self._payload_args.setdefault('tools', []).append({
               'type': 'function',
               'function': {
                   'name': fdecl.name,
@@ -290,8 +291,25 @@ class OpenRouterModel(processor.Processor):
                   'parameters': parameters,
               },
           })
-    else:
-      self._tools = None
+
+    for key, value in self._config.items():
+      if value is None:
+        continue
+
+      if key == 'response_schema':
+        # Convert genai_types.SchemaUnion to JSON schema for OpenRouter.
+        schema_json = tool_utils.to_schema(value).json_schema.model_dump(
+            mode='json', exclude_unset=True
+        )
+        self._payload_args['response_format'] = {
+            'type': 'json_object',
+            'schema': schema_json,
+        }
+      elif key == 'tools':
+        # Tools have been already handled.
+        pass
+      elif key not in ('tools'):
+        self._payload_args[key] = value
 
   @property
   def key_prefix(self) -> str:
@@ -334,24 +352,7 @@ class OpenRouterModel(processor.Processor):
         'messages': messages,
         'stream': True,
     }
-
-    # Add configuration parameters.
-    for key, value in self._config.items():
-      if key == 'response_schema' and value is not None:
-        # Convert genai_types.SchemaUnion to JSON schema for OpenRouter.
-        schema_json = tool_utils.to_schema(value).json_schema.model_dump(
-            mode='json', exclude_unset=True
-        )
-        payload['response_format'] = {
-            'type': 'json_object',
-            'schema': schema_json,
-        }
-      elif key not in ('response_schema', 'tools') and value is not None:
-        payload[key] = value
-
-    # Add tools if available.
-    if self._tools is not None:
-      payload['tools'] = self._tools
+    payload.update(self._payload_args)
 
     # Make streaming request.
     async with self._client.stream(
