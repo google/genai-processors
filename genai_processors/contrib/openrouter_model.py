@@ -67,7 +67,7 @@ For a complete list, visit: https://openrouter.ai/models
 import base64
 from collections.abc import AsyncIterable
 import json
-from typing import Any, Literal
+from typing import Any
 
 from genai_processors import content_api
 from genai_processors import processor
@@ -120,8 +120,6 @@ class GenerateContentConfig(TypedDict, total=False):
   These types can be objects, but also primitives and arrays.
   Represents a select subset of an [OpenAPI 3.0 schema
   object](https://spec.openapis.org/oas/v3.0.3#schema).
-  If set, a compatible response_mime_type must also be set.
-  Compatible mimetypes: `application/json`: Schema for JSON response.
   """
 
   stop: list[str] | str | None
@@ -141,9 +139,6 @@ class GenerateContentConfig(TypedDict, total=False):
 
   models: list[str] | None
   """Fallback models if primary model fails."""
-
-  route: Literal['fallback'] | None
-  """Routing strategy for model selection."""
 
   provider: dict[str, Any] | None
   """Provider-specific preferences."""
@@ -369,6 +364,9 @@ class OpenRouterModel(processor.Processor):
             f'{e}: {error_detail}', request=e.request, response=e.response
         )
 
+      # Buffer for accumulating function calls across streaming chunks
+      accumulated_function_call = {'name': '', 'arguments': ''}
+      
       async for line in response.aiter_lines():
         parsed = _parse_sse_line(line)
         if not parsed:
@@ -393,20 +391,33 @@ class OpenRouterModel(processor.Processor):
           )
 
         if function_call := delta.get('function_call'):
-          if 'name' in function_call or 'arguments' in function_call:
-            # For function calls, we need to accumulate the complete call.
-            # This is a simplified version - in practice you might want to
-            # buffer function calls until complete.
-            yield content_api.ProcessorPart(
-                genai_types.Part.from_function_call(
-                    name=function_call.get('name', ''),
-                    args=json.loads(function_call.get('arguments', '{}')),
-                ),
-                role='model',
-                metadata=self._build_metadata(parsed),
-            )
+          # Accumulate function call parts across streaming chunks
+          if 'name' in function_call:
+            accumulated_function_call['name'] += function_call['name']
+          if 'arguments' in function_call:
+            accumulated_function_call['arguments'] += function_call['arguments']
 
         if finish_reason := choice.get('finish_reason'):
+          # If we have accumulated a function call, yield it when the stream ends
+          if accumulated_function_call['name'] or accumulated_function_call['arguments']:
+            try:
+              # Parse the complete arguments JSON
+              args = json.loads(accumulated_function_call['arguments']) if accumulated_function_call['arguments'] else {}
+              
+              if not accumulated_function_call['name']:
+                raise ValueError("Function call missing name")
+                
+              yield content_api.ProcessorPart(
+                  genai_types.Part.from_function_call(
+                      name=accumulated_function_call['name'],
+                      args=args,
+                  ),
+                  role='model',
+                  metadata=self._build_metadata(parsed),
+              )
+            except (json.JSONDecodeError, ValueError) as e:
+              raise ValueError(f"Incomplete or invalid function call: {e}") from e
+          
           yield content_api.ProcessorPart(
               '',
               role='model',
@@ -426,12 +437,6 @@ class OpenRouterModel(processor.Processor):
 
     if 'model' in response_data:
       metadata['model'] = response_data['model']
-
-    if 'id' in response_data:
-      metadata['request_id'] = response_data['id']
-
-    if 'created' in response_data:
-      metadata['created'] = response_data['created']
 
     return metadata
 

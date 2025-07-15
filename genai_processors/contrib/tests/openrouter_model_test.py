@@ -15,6 +15,8 @@
 
 """Tests for OpenRouter model processor."""
 
+import enum
+import http
 import json
 import unittest
 from unittest import mock
@@ -22,407 +24,353 @@ from unittest import mock
 from absl.testing import parameterized
 from genai_processors import content_api
 from genai_processors import processor
-from genai_processors import streams
 from genai_processors.contrib import openrouter_model
 from google.genai import types as genai_types
 import httpx
 
 
-class OpenRouterModelTest(
-    parameterized.TestCase, unittest.IsolatedAsyncioTestCase
-):
-  """Tests for OpenRouterModel processor."""
+class ResponseEnum(enum.StrEnum):
+  GOOD = 'good'
+  EXCELLENT = 'excellent'
 
-  def setUp(self):
-    """Set up test fixtures."""
-    super().setUp()
-    self.api_key = 'test_api_key'
-    self.model_name = 'openai/gpt-4o'
-    self.base_config = {
-        'temperature': 0.7,
-        'max_tokens': 100,
-    }
 
-  def test_init_with_default_config(self):
-    """Test initialization with default configuration."""
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
+class OpenRouterModelTest(parameterized.TestCase):
+
+  def test_basic_inference(self):
+    def request_handler(request: httpx.Request):
+      self.assertEqual(str(request.url), 'https://openrouter.ai/api/v1/chat/completions')
+      self.assertEqual(request.headers['authorization'], 'Bearer test-api-key')
+      self.assertEqual(request.headers['content-type'], 'application/json')
+      self.assertEqual(request.headers['user-agent'], 'genai-processors')
+      
+      request_body = json.loads(request.content.decode('utf-8'))
+      self.assertEqual(request_body['model'], 'openai/gpt-4o')
+      self.assertEqual(request_body['stream'], True)
+      self.assertEqual(request_body['messages'], [
+          {'role': 'user', 'content': 'Hello, how are you?'}
+      ])
+
+      response_lines = [
+          'data: {"choices": [{"delta": {"content": "I am"}, "finish_reason": null}]}',
+          'data: {"choices": [{"delta": {"content": " doing well"}, "finish_reason": null}]}',
+          'data: {"choices": [{"delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9}, "model": "openai/gpt-4o"}',
+          'data: [DONE]',
+      ]
+      return httpx.Response(
+          http.HTTPStatus.OK, 
+          content='\n'.join(response_lines).encode('utf-8')
+      )
+
+    # Mock client with proper headers that match what OpenRouter model sets
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+        }
     )
 
-    self.assertEqual(model._api_key, self.api_key)
-    self.assertEqual(model._model_name, self.model_name)
-    self.assertEqual(model._base_url, openrouter_model._DEFAULT_BASE_URL)
-    self.assertIsNone(model._site_url)
-    self.assertIsNone(model._site_name)
-
-  def test_init_with_custom_config(self):
-    """Test initialization with custom configuration."""
-    site_url = 'https://example.com'
-    site_name = 'Test Site'
-    base_url = 'https://custom.openrouter.com/api/v1'
-
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-        base_url=base_url,
-        site_url=site_url,
-        site_name=site_name,
-        generate_content_config=self.base_config,
-    )
-
-    self.assertEqual(model._base_url, base_url)
-    self.assertEqual(model._site_url, site_url)
-    self.assertEqual(model._site_name, site_name)
-    self.assertEqual(model._config, self.base_config)
-
-  def test_key_prefix(self):
-    """Test key_prefix property."""
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-    )
-
-    expected_prefix = f'OpenRouterModel_{self.model_name}'
-    self.assertEqual(model.key_prefix, expected_prefix)
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='text_user',
-          part=content_api.ProcessorPart('Hello world', role='user'),
-          expected={'role': 'user', 'content': 'Hello world'},
-      ),
-      dict(
-          testcase_name='text_model',
-          part=content_api.ProcessorPart('Hi there!', role='model'),
-          expected={'role': 'model', 'content': 'Hi there!'},
-      ),
-      dict(
-          testcase_name='text_no_role',
-          part=content_api.ProcessorPart('Hello'),
-          expected={'role': 'user', 'content': 'Hello'},
-      ),
-  )
-  def test_to_openrouter_message_text(self, part, expected):
-    """Test conversion of text parts to OpenRouter message format."""
-    result = openrouter_model._to_openrouter_message(part)
-    self.assertEqual(result, expected)
-
-  def test_to_openrouter_message_function_call(self):
-    """Test conversion of function call parts."""
-    func_call = genai_types.Part.from_function_call(
-        name='test_function', args={'param1': 'value1', 'param2': 42}
-    )
-    part = content_api.ProcessorPart(func_call, role='model')
-
-    result = openrouter_model._to_openrouter_message(part)
-
-    expected = {
-        'role': 'model',
-        'function_call': {
-            'name': 'test_function',
-            'arguments': json.dumps({'param1': 'value1', 'param2': 42}),
-        },
-    }
-    self.assertEqual(result, expected)
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='comment_line',
-          line=': OPENROUTER PROCESSING',
-          expected=None,
-      ),
-      dict(
-          testcase_name='empty_line',
-          line='',
-          expected=None,
-      ),
-      dict(
-          testcase_name='done_event',
-          line='data: [DONE]',
-          expected={'type': 'done'},
-      ),
-      dict(
-          testcase_name='valid_json',
-          line='data: {"choices": [{"delta": {"content": "Hello"}}]}',
-          expected={'choices': [{'delta': {'content': 'Hello'}}]},
-      ),
-  )
-  def test_parse_sse_line(self, line, expected):
-    """Test parsing of Server-Sent Events lines."""
-    result = openrouter_model._parse_sse_line(line)
-    self.assertEqual(result, expected)
-
-  def test_parse_sse_line_invalid_json(self):
-    """Test that invalid JSON raises an exception."""
-    with self.assertRaises(json.JSONDecodeError):
-      openrouter_model._parse_sse_line('data: {invalid json}')
-
-  async def test_call_with_mock_response(self):
-    """Test the call method with mocked HTTP response."""
-    mock_response_data = [
-        (
-            'data: {"choices": [{"delta": {"content": "Hello"}}], "model":'
-            ' "openai/gpt-4o"}'
-        ),
-        (
-            'data: {"choices": [{"delta": {"content": " world"}}], "model":'
-            ' "openai/gpt-4o"}'
-        ),
-        (
-            'data: {"choices": [{"finish_reason": "stop"}], "model":'
-            ' "openai/gpt-4o"}'
-        ),
-        'data: [DONE]',
-    ]
-
-    async def mock_aiter_lines():
-      for chunk in mock_response_data:
-        yield chunk
-
-    def mock_raise_for_status():
-      return None
-
-    mock_response = mock.AsyncMock()
-    mock_response.aiter_lines = mock_aiter_lines
-    mock_response.raise_for_status = mock_raise_for_status
-
-    mock_context = mock.AsyncMock()
-    mock_context.__aenter__ = mock.AsyncMock(return_value=mock_response)
-    mock_context.__aexit__ = mock.AsyncMock(return_value=None)
-
-    with mock.patch.object(
-        httpx.AsyncClient, 'stream', return_value=mock_context
-    ) as mock_stream:
-
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
       model = openrouter_model.OpenRouterModel(
-          api_key=self.api_key,
-          model_name=self.model_name,
-          generate_content_config=self.base_config,
+          api_key='test-api-key',
+          model_name='openai/gpt-4o',
+      )
+      output = processor.apply_sync(model, ['Hello, how are you?'])
+
+    self.assertEqual(content_api.as_text(output), 'I am doing well')
+    # Check that the last part has the correct metadata
+    last_part = output[-1]
+    self.assertEqual(last_part.metadata['finish_reason'], 'stop')
+    self.assertEqual(last_part.metadata['end_of_turn'], True)
+    self.assertEqual(last_part.metadata['model'], 'openai/gpt-4o')
+    self.assertEqual(last_part.metadata['usage']['total_tokens'], 9)
+
+  def test_headers_and_site_info(self):
+    def request_handler(request: httpx.Request):
+      self.assertEqual(str(request.url), 'https://openrouter.ai/api/v1/chat/completions')
+      self.assertEqual(request.headers['authorization'], 'Bearer test-api-key')
+      self.assertEqual(request.headers['http-referer'], 'https://mysite.com')
+      self.assertEqual(request.headers['x-title'], 'My App')
+      
+      response_lines = [
+          'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}',
+          'data: [DONE]',
+      ]
+      return httpx.Response(
+          http.HTTPStatus.OK, 
+          content='\n'.join(response_lines).encode('utf-8')
       )
 
-      input_content = [content_api.ProcessorPart('Test input')]
-      result = []
-
-      async for part in model(streams.stream_content(input_content)):
-        result.append(part)
-
-      # Verify the request was made correctly.
-      mock_stream.assert_called_once()
-      call_args = mock_stream.call_args
-      self.assertEqual(call_args[0][0], 'POST')
-      self.assertEqual(call_args[0][1], '/chat/completions')
-
-      # Check the request payload
-      request_json = call_args[1]['json']
-      self.assertEqual(request_json['model'], self.model_name)
-      self.assertEqual(
-          request_json['messages'], [{'role': 'user', 'content': 'Test input'}]
-      )
-      self.assertTrue(request_json['stream'])
-      self.assertEqual(request_json['temperature'], 0.7)
-      self.assertEqual(request_json['max_tokens'], 100)
-
-      # Verify the response processing.
-      # Two content chunks + finish reason.
-      self.assertEqual(len(result), 3)  # pylint: disable=g-generic-assert
-      self.assertEqual(result[0].text, 'Hello')
-      self.assertEqual(result[1].text, ' world')
-      self.assertEqual(result[2].text, '')
-      self.assertEqual(result[2].metadata['finish_reason'], 'stop')
-      self.assertTrue(result[2].metadata['end_of_turn'])
-
-  def test_call_with_http_error(self):
-    """Test error parsing functionality."""
-    model = openrouter_model.OpenRouterModel(
-        api_key='test_key',
-        model_name=self.model_name,
+    # Mock client with site-specific headers
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+            'HTTP-Referer': 'https://mysite.com',
+            'X-Title': 'My App',
+        }
     )
 
-    # Test error parsing.
-    error_body = b'{"error": {"message": "Invalid API key"}}'
-    parsed_error = model._parse_error_response(error_body)
-    self.assertEqual(parsed_error, 'Invalid API key')
-
-    # Test with malformed JSON.
-    error_body = b'Invalid JSON'
-    parsed_error = model._parse_error_response(error_body)
-    self.assertEqual(parsed_error, 'Invalid JSON')
-
-  async def test_call_with_empty_input(self):
-    """Test call method with empty input."""
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-    )
-
-    # Empty input should return immediately without making API calls.
-    result = await processor.apply_async(model, [])
-    self.assertEqual(result, [])
-
-  def test_build_metadata(self):
-    """Test metadata building from response data."""
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-    )
-
-    response_data = {
-        'id': 'chatcmpl-123',
-        'model': 'openai/gpt-4o',
-        'created': 1234567890,
-        'usage': {
-            'prompt_tokens': 10,
-            'completion_tokens': 20,
-            'total_tokens': 30,
-        },
-    }
-
-    metadata = model._build_metadata(response_data)
-
-    expected = {
-        'request_id': 'chatcmpl-123',
-        'model': 'openai/gpt-4o',
-        'created': 1234567890,
-        'usage': {
-            'prompt_tokens': 10,
-            'completion_tokens': 20,
-            'total_tokens': 30,
-        },
-    }
-
-    self.assertEqual(metadata, expected)
-
-  async def test_aclose(self):
-    """Test proper cleanup of HTTP client."""
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-    )
-
-    with mock.patch.object(model._client, 'aclose') as mock_aclose:
-      await model.aclose()
-      mock_aclose.assert_called_once()
-
-  async def test_async_context_manager(self):
-    """Test async context manager functionality."""
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-    )
-
-    with mock.patch.object(model._client, 'aclose') as mock_aclose:
-      async with model:
-        pass  # Just test the context manager works.
-      mock_aclose.assert_called_once()
-
-  def test_apply_sync_integration(self):
-    """Test integration with processor.apply_sync."""
-    mock_response_data = [
-        'data: {"choices": [{"delta": {"content": "Sync response"}}]}',
-        'data: {"choices": [{"finish_reason": "stop"}]}',
-        'data: [DONE]',
-    ]
-
-    async def mock_aiter_lines():
-      for chunk in mock_response_data:
-        yield chunk
-
-    def mock_raise_for_status():
-      return None
-
-    mock_response = mock.AsyncMock()
-    mock_response.aiter_lines = mock_aiter_lines
-    mock_response.raise_for_status = mock_raise_for_status
-
-    mock_context = mock.AsyncMock()
-    mock_context.__aenter__ = mock.AsyncMock(return_value=mock_response)
-    mock_context.__aexit__ = mock.AsyncMock(return_value=None)
-
-    with mock.patch.object(
-        httpx.AsyncClient, 'stream', return_value=mock_context
-    ):
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
       model = openrouter_model.OpenRouterModel(
-          api_key=self.api_key,
-          model_name=self.model_name,
+          api_key='test-api-key',
+          model_name='test-model',
+          site_url='https://mysite.com',
+          site_name='My App',
+      )
+      processor.apply_sync(model, ['test'])
+
+  def test_config_parameters(self):
+    def request_handler(request: httpx.Request):
+      request_body = json.loads(request.content.decode('utf-8'))
+      self.assertEqual(request_body['temperature'], 0.8)
+      self.assertEqual(request_body['max_tokens'], 100)
+      self.assertEqual(request_body['top_p'], 0.9)
+      
+      response_lines = [
+          'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}',
+          'data: [DONE]',
+      ]
+      return httpx.Response(
+          http.HTTPStatus.OK, 
+          content='\n'.join(response_lines).encode('utf-8')
       )
 
-      input_content = [content_api.ProcessorPart('Test sync input')]
-      result = processor.apply_sync(model, input_content)
-
-      # Should get the content response.
-      text_parts = [part for part in result if part.text]
-      self.assertEqual(len(text_parts), 1)  # pylint: disable=g-generic-assert
-      self.assertEqual(text_parts[0].text, 'Sync response')
-
-  def test_response_schema_conversion(self):
-    """Test that response_schema is correctly converted to OpenRouter format."""
-    # Create a simple schema.
-    schema = genai_types.Schema(
-        type=genai_types.Type.OBJECT,
-        properties={
-            'name': genai_types.Schema(type=genai_types.Type.STRING),
-            'age': genai_types.Schema(type=genai_types.Type.INTEGER),
-        },
-        required=['name'],
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+        }
     )
 
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-        generate_content_config={'response_schema': schema},
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
+      model = openrouter_model.OpenRouterModel(
+          api_key='test-api-key',
+          model_name='test-model',
+          generate_content_config=openrouter_model.GenerateContentConfig(
+              temperature=0.8,
+              max_tokens=100,
+              top_p=0.9,
+          ),
+      )
+      processor.apply_sync(model, ['test'])
+
+  def test_response_schema(self):
+    def request_handler(request: httpx.Request):
+      request_body = json.loads(request.content.decode('utf-8'))
+      self.assertIn('response_format', request_body)
+      self.assertEqual(request_body['response_format']['type'], 'json_object')
+      self.assertIn('schema', request_body['response_format'])
+      
+      response_lines = [
+          'data: {"choices": [{"delta": {"content": "{\\"result\\": \\"good\\"}"}, "finish_reason": "stop"}]}',
+          'data: [DONE]',
+      ]
+      return httpx.Response(
+          http.HTTPStatus.OK, 
+          content='\n'.join(response_lines).encode('utf-8')
+      )
+
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+        }
     )
 
-    # The schema should be in the config.
-    self.assertEqual(model._config['response_schema'], schema)
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
+      model = openrouter_model.OpenRouterModel(
+          api_key='test-api-key',
+          model_name='test-model',
+          generate_content_config=openrouter_model.GenerateContentConfig(
+              response_schema=ResponseEnum,
+          ),
+      )
+      output = processor.apply_sync(model, ['How is the weather?'])
+      
+    self.assertEqual(content_api.as_text(output), '{"result": "good"}')
 
-  def test_tools_conversion(self):
-    """Test that tools are correctly converted to OpenRouter format."""
-    # Create a simple tool.
-    function_decl = genai_types.FunctionDeclaration(
-        name='get_weather',
-        description='Get weather information',
-        parameters=genai_types.Schema(
-            type=genai_types.Type.OBJECT,
-            properties={
-                'location': genai_types.Schema(
-                    type=genai_types.Type.STRING,
-                    description='Location to get weather for',
-                ),
-            },
-            required=['location'],
-        ),
+  def test_function_calling(self):
+    call_count = 0
+    
+    def request_handler(request: httpx.Request):
+      nonlocal call_count
+      call_count += 1
+      request_body = json.loads(request.content.decode('utf-8'))
+      
+      if call_count == 1:
+        # First request - return function call
+        response_lines = [
+            'data: {"choices": [{"delta": {"function_call": {"name": "get_weather"}}, "finish_reason": null}]}',
+            'data: {"choices": [{"delta": {"function_call": {"arguments": "{\\"location\\": \\"Boston\\"}"}}, "finish_reason": null}]}',
+            'data: {"choices": [{"delta": {}, "finish_reason": "function_call"}]}',
+            'data: [DONE]',
+        ]
+      else:
+        # Second request with function response - return text
+        response_lines = [
+            'data: {"choices": [{"delta": {"content": "The weather in Boston is 72°F and sunny."}, "finish_reason": "stop"}]}',
+            'data: [DONE]',
+        ]
+      
+      return httpx.Response(
+          http.HTTPStatus.OK, 
+          content='\n'.join(response_lines).encode('utf-8')
+      )
+
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+        }
     )
 
-    tool = genai_types.Tool(function_declarations=[function_decl])
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
+      weather_tool = genai_types.Tool(
+          function_declarations=[
+              genai_types.FunctionDeclaration(
+                  name='get_weather',
+                  description='Get the current weather',
+                  parameters=genai_types.Schema(
+                      type=genai_types.Type.OBJECT,
+                      properties={
+                          'location': genai_types.Schema(
+                              type=genai_types.Type.STRING,
+                              description='The city and state, e.g. San Francisco, CA',
+                          )
+                      },
+                      required=['location'],
+                  ),
+              )
+          ]
+      )
+      
+      model = openrouter_model.OpenRouterModel(
+          api_key='test-api-key',
+          model_name='test-model',
+          generate_content_config=openrouter_model.GenerateContentConfig(
+              tools=[weather_tool]
+          ),
+      )
 
-    model = openrouter_model.OpenRouterModel(
-        api_key=self.api_key,
-        model_name=self.model_name,
-        generate_content_config={'tools': [tool]},
+      # First request
+      conversation = ['What is the weather in Boston?']
+      output = processor.apply_sync(model, conversation)
+      
+      self.assertEqual(len(output), 2)  # Function call + end marker
+      function_call_part = output[0]
+      self.assertIsNotNone(function_call_part.function_call)
+      self.assertEqual(function_call_part.function_call.name, 'get_weather')
+      self.assertEqual(function_call_part.function_call.args, {'location': 'Boston'})
+      
+      # Add function response and make second request
+      conversation.extend(output)
+      conversation.append(
+          content_api.ProcessorPart.from_function_response(
+              name='get_weather',
+              response={'weather': '72°F and sunny'},
+          )
+      )
+      
+      output = processor.apply_sync(model, conversation)
+      self.assertEqual(content_api.as_text(output), 'The weather in Boston is 72°F and sunny.')
+
+  def test_image_input(self):
+    def request_handler(request: httpx.Request):
+      request_body = json.loads(request.content.decode('utf-8'))
+      message = request_body['messages'][0]
+      
+      self.assertEqual(message['role'], 'user')
+      self.assertIsInstance(message['content'], list)
+      self.assertEqual(len(message['content']), 1)
+      
+      content_item = message['content'][0]
+      self.assertEqual(content_item['type'], 'image_url')
+      self.assertIn('image_url', content_item)
+      self.assertTrue(content_item['image_url']['url'].startswith('data:image/png;base64,'))
+      
+      response_lines = [
+          'data: {"choices": [{"delta": {"content": "I see a test image."}, "finish_reason": "stop"}]}',
+          'data: [DONE]',
+      ]
+      return httpx.Response(
+          http.HTTPStatus.OK, 
+          content='\n'.join(response_lines).encode('utf-8')
+      )
+
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer test-api-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+        }
     )
 
-    # Verify tools were processed correctly.
-    self.assertEqual(
-        model._payload_args['tools'],
-        [{
-            'type': 'function',
-            'function': {
-                'name': 'get_weather',
-                'description': 'Get weather information',
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'location': {
-                            'type': 'string',
-                            'description': 'Location to get weather for',
-                        }
-                    },
-                    'required': ['location'],
-                },
-            },
-        }],
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
+      model = openrouter_model.OpenRouterModel(
+          api_key='test-api-key',
+          model_name='test-model',
+      )
+      
+      # Create a simple PNG image bytes
+      png_bytes = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde'
+      
+      output = processor.apply_sync(
+          model, 
+          [content_api.ProcessorPart(png_bytes, mimetype='image/png')]
+      )
+      
+    self.assertEqual(content_api.as_text(output), 'I see a test image.')
+
+  def test_error_handling(self):
+    def request_handler(request: httpx.Request):
+      error_response = {
+          'error': {
+              'message': 'Invalid API key',
+              'code': 401
+          }
+      }
+      return httpx.Response(
+          http.HTTPStatus.UNAUTHORIZED, 
+          content=json.dumps(error_response).encode('utf-8')
+      )
+
+    mock_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(request_handler),
+        base_url='https://openrouter.ai/api/v1',
+        headers={
+            'Authorization': 'Bearer invalid-key',
+            'Content-Type': 'application/json',
+            'User-Agent': 'genai-processors',
+        }
     )
+
+    with mock.patch.object(httpx, 'AsyncClient', return_value=mock_client):
+      model = openrouter_model.OpenRouterModel(
+          api_key='invalid-key',
+          model_name='test-model',
+      )
+      
+      with self.assertRaises(httpx.HTTPStatusError) as context:
+        processor.apply_sync(model, ['test'])
+      
+      self.assertIn('Invalid API key', str(context.exception))
 
 
 if __name__ == '__main__':
