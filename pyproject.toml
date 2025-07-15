@@ -34,6 +34,7 @@ dependencies = [
     "numpy>=2.0.0",
     "pdfrw>=0.4",
     "Pillow>=9.0.0",
+    "termcolor>=3.0.0",
     "pypdfium2>=4.30.1",
     "xxhash>=3.0.0",
 ]
