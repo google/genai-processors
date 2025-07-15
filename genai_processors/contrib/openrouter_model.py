@@ -71,7 +71,7 @@ from typing import Any, Literal
 
 from genai_processors import content_api
 from genai_processors import processor
-from google.genai import _transformers
+from genai_processors import tool_utils
 from google.genai import types as genai_types
 import httpx
 from typing_extensions import TypedDict
@@ -155,32 +155,25 @@ def _to_openrouter_message(
   """Convert ProcessorPart to OpenRouter message format."""
   role = part.role.lower() if part.role else default_role
 
-  # Handle function calls.
   if part.function_call:
     return {
-        'role': part.role.lower(),
+        'role': role,
         'function_call': {
             'name': part.function_call.name,
             'arguments': json.dumps(part.function_call.args),
         },
     }
-
-  # Handle function responses.
   if part.function_response:
     return {
         'role': 'function',
         'name': part.function_response.name,
         'content': json.dumps(part.function_response.response),
     }
-
-  # Handle text content.
   if content_api.is_text(part.mimetype):
     return {
         'role': role,
         'content': part.text,
     }
-
-  # Handle multimodal content.
   if content_api.is_image(part.mimetype):
     # Convert image to base64 for OpenRouter.
     if part.bytes:
@@ -278,28 +271,14 @@ class OpenRouterModel(processor.Processor):
 
     # Initialize tools.
     if tools := self._config.get('tools'):
+      tool_utils.raise_for_gemini_server_side_tools(tools)
       self._tools = []
       for tool in tools:
-        for tool_name in (
-            'retrieval',
-            'google_search',
-            'google_search_retrieval',
-            'enterprise_web_search',
-            'google_maps',
-            'url_context',
-            'code_execution',
-            'computer_use',
-        ):
-          if getattr(tool, tool_name) is not None:
-            raise ValueError(f'Tool {tool_name} is not supported.')
-
         for fdecl in tool.function_declarations or ():
           if fdecl.parameters:
-            parameters = _transformers.t_schema(  # pytype: disable=wrong-arg-types
-                _FakeClient(), fdecl.parameters
-            ).json_schema.model_dump(
-                mode='json', exclude_unset=True
-            )
+            parameters = tool_utils.to_schema(
+                fdecl.parameters
+            ).json_schema.model_dump(mode='json', exclude_unset=True)
           else:
             parameters = None
 
@@ -360,9 +339,9 @@ class OpenRouterModel(processor.Processor):
     for key, value in self._config.items():
       if key == 'response_schema' and value is not None:
         # Convert genai_types.SchemaUnion to JSON schema for OpenRouter.
-        schema_json = _transformers.t_schema(
-            _FakeClient(), value
-        ).json_schema.model_dump(mode='json', exclude_unset=True)
+        schema_json = tool_utils.to_schema(value).json_schema.model_dump(
+            mode='json', exclude_unset=True
+        )
         payload['response_format'] = {
             'type': 'json_object',
             'schema': schema_json,
@@ -467,10 +446,3 @@ class OpenRouterModel(processor.Processor):
     """Async context manager exit - clean up HTTP client."""
     if hasattr(self, '_client') and self._client:
       await self._client.aclose()
-
-
-class _FakeClient:
-  """A fake genai client to invoke t_schema."""
-
-  def __init__(self):
-    self.vertexai = False
