@@ -3,7 +3,7 @@ from absl.testing import parameterized
 
 from genai_processors import content_api, processor
 from genai_processors.contrib.langchain_model import LangChainModel
-
+from langchain_core.messages import HumanMessage
 
 class MockChunk:
     """
@@ -97,6 +97,7 @@ class LangChainModelTest(parameterized.TestCase):
         """
         Multiple fragments of the same role should be grouped into one
         LangChain message, preserving order.
+        Each fragment now becomes its own HumanMessage.
         """
         llm = MockChatModel([])
         proc = LangChainModel(llm=llm)
@@ -107,17 +108,14 @@ class LangChainModelTest(parameterized.TestCase):
         ]
         msgs = proc._convert_to_langchain_messages(parts)
 
-        self.assertLen(msgs, 1)
-        human_msg = msgs[0]
+        # now two messages: one text, one image
+        self.assertLen(msgs, 2)
+        self.assertIsInstance(msgs[0], HumanMessage)
+        self.assertEqual(msgs[0].content, "Caption me")
 
-        fragments = human_msg.content
-        self.assertLen(fragments, 2)
+        self.assertIsInstance(msgs[1], HumanMessage)
+        self.assertTrue(msgs[1].content.startswith("data:image/png;base64,"))
 
-        self.assertEqual(fragments[0]["type"], "text")
-        self.assertEqual(fragments[0]["text"], "Caption me")
-
-        self.assertEqual(fragments[1]["type"], "image_url")
-        self.assertTrue(fragments[1]["image_url"].startswith("data:image/png;base64,"))
 
     @parameterized.parameters(
         ("audio/mpeg", b"\x00\x01"),

@@ -85,41 +85,23 @@ class LangChainModel(processor.Processor):
         parts: List[ProcessorPart]
     ) -> List[Union[HumanMessage, SystemMessage, AIMessage]]:
         messages: List[Union[HumanMessage, SystemMessage, AIMessage]] = []
-        fragments: List[dict] = []
-        last_role: Optional[str] = None
-
-        def flush():
-            nonlocal fragments, last_role
-            if not fragments:
-                return
-            cls = {
-                "system": SystemMessage,
-                "model": AIMessage,
-            }.get(last_role, HumanMessage)
-            messages.append(cls(content=list(fragments)))
-            fragments = []
 
         for part in parts:
             if is_text(part.mimetype):
-                frag = {
-                    "type": "text",
-                    "text": part.text,
-                    "metadata": part.metadata
-                }
+                content = part.text
             elif is_image(part.mimetype) and part.bytes:
                 b64 = base64.b64encode(part.bytes).decode("utf-8")
-                frag = {
-                    "type": "image_url",
-                    "image_url": f"data:{part.mimetype};base64,{b64}",
-                    "metadata": part.metadata
-                }
+                content = f"data:{part.mimetype};base64,{b64}"
             else:
                 raise ValueError(f"Unsupported mimetype: {part.mimetype}")
 
-            if part.role != last_role:
-                flush()
-                last_role = part.role
-            fragments.append(frag)
+            if part.role == "system":
+                msg = SystemMessage(content=content)
+            elif part.role == "model":
+                msg = AIMessage(content=content)
+            else:
+                msg = HumanMessage(content=content)
 
-        flush()
+            messages.append(msg)
+
         return messages
