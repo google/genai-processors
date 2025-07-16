@@ -11,76 +11,69 @@
 # limitations under the License.
 # ==============================================================================
 
-"""
-Demonstrates how to use LangChainModel for:
-  - Multimodal inputs (text + images)
-  - Streaming responses
-"""
+"""Demonstrates how to use LangChainModel for multimodal and streaming inputs."""
 
 import asyncio
-import httpx
-
-from genai_processors.contrib.langchain_model import LangChainModel
+from genai_processors import content_api
 from genai_processors import streams
-from genai_processors.content_api import ProcessorContent, ProcessorPart
-from langchain_google_genai import ChatGoogleGenerativeAI
+from genai_processors.contrib.langchain_model import LangChainModel
+import httpx
+import langchain_google_genai
 
 
 async def fetch_image_bytes(url: str) -> bytes:
-    """Fetch image bytes from a URL asynchronously."""
-    async with httpx.AsyncClient() as client:
-      response = await client.get(url)
-      response.raise_for_status()
-      return response.read()
+  """Fetch image bytes from a URL asynchronously."""
+  async with httpx.AsyncClient() as client:
+    response = await client.get(url)
+    response.raise_for_status()
+    return response.read()
 
 
 async def test_multimodal_processor():
-    # 1. Build the text prompt and image as ProcessorParts
-    image_url = "https://fastly.picsum.photos/id/11/2500/1667.jpg?hmac=xxjFJtAPgshYkysU_aqx2sZir-kIOjNR9vx0te7GycQ"
-    
-    # Fetch image bytes
-    try:
-        image_bytes = await fetch_image_bytes(image_url)
-    except Exception as e:
-        print(f"Error fetching image: {e}")
-        return
+  """Does multimodal inference."""
+  # 1. Build the text prompt and image as ProcessorParts
+  image_url = 'https://fastly.picsum.photos/id/11/2500/1667.jpg?hmac=xxjFJtAPgshYkysU_aqx2sZir-kIOjNR9vx0te7GycQ'
 
-    parts = [
-        ProcessorPart(
-            value="Describe this image and suggest similar artworks.",
-            mimetype="text/plain",
-            role="user",
-            metadata={"query_type": "art_analysis"}
-        ),
-        ProcessorPart(
-            value=image_bytes,
-            mimetype="image/jpeg",
-            role="user",
-            metadata={"source": "web", "artist": "Unknown"}
-        )
-    ]
+  # Fetch image bytes
+  image_bytes = await fetch_image_bytes(image_url)
 
-    # 2. Combine parts into a single ProcessorContent
-    content = ProcessorContent(parts)
+  parts = [
+      content_api.ProcessorPart(
+          value='Describe this image and suggest similar artworks.',
+          mimetype='text/plain',
+          role='user',
+          metadata={'query_type': 'art_analysis'},
+      ),
+      content_api.ProcessorPart(
+          value=image_bytes,
+          mimetype='image/jpeg',
+          role='user',
+          metadata={'source': 'web', 'artist': 'Unknown'},
+      ),
+  ]
 
-    # 3. Create the LLM instance
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+  # 2. Combine parts into a single ProcessorContent
+  content = content_api.ProcessorContent(parts)
 
-    # 4. Instantiate the processor with a system instruction
-    mm_processor = LangChainModel(
-        llm=llm,
-        system_instruction="You are an art expert assistant."
-    )
+  # 3. Create the LLM instance
+  llm = langchain_google_genai.ChatGoogleGenerativeAI(model='gemini-1.5-flash')
 
-    # 5. Run the multimodal prompt, streaming back the response
-    async for part in mm_processor(streams.stream_content(content)):
-        print(part.text, end="", flush=True)
+  # 4. Instantiate the processor with a system instruction
+  mm_processor = LangChainModel(
+      llm=llm, system_instruction='You are an art expert assistant.'
+  )
 
-    print("\nProcessing complete!")
+  # 5. Run the multimodal prompt, streaming back the response
+  async for part in mm_processor(streams.stream_content(content)):
+    print(part.text, end='', flush=True)
+
+  print('\nProcessing complete!')
+
 
 def main():
-    """Run the example scenario."""
-    asyncio.run(test_multimodal_processor())
+  """Run the example scenario."""
+  asyncio.run(test_multimodal_processor())
 
-if __name__ == "__main__":
-    main()
+
+if __name__ == '__main__':
+  main()
