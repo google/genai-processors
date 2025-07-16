@@ -18,19 +18,21 @@ Demonstrates how to use LangChainModel for:
 """
 
 import asyncio
-import aiohttp
+import httpx
+
 from genai_processors.contrib.langchain_model import LangChainModel
 from genai_processors import streams
 from genai_processors.content_api import ProcessorContent, ProcessorPart
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+
 async def fetch_image_bytes(url: str) -> bytes:
     """Fetch image bytes from a URL asynchronously."""
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                raise ValueError(f"Failed to fetch image from {url}: {response.status}")
-            return await response.read()
+    async with httpx.AsyncClient() as client:
+      response = await client.get(url)
+      response.raise_for_status()
+      return response.read()
+
 
 async def test_multimodal_processor():
     # 1. Build the text prompt and image as ProcessorParts
