@@ -39,17 +39,14 @@ p = OpenRouterModel(
 INPUT_PROMPT = 'Write a haiku about artificial intelligence'
 
 content = processors.apply_sync(p, [INPUT_PROMPT])
-for part in content:
-  if part.text:
-    print(part.text)
+print(content_api.as_text(content))
 ```
 
 ### Async Execution
 
 ```py
 async for part in p.stream_content([INPUT_PROMPT]):
-  if part.text:
-    print(part.text)
+  print(part.text)
 ```
 
 ### Available Models
@@ -170,7 +167,6 @@ def _to_openrouter_message(
         'content': part.text,
     }
   if content_api.is_image(part.mimetype):
-    # Convert image to base64 for OpenRouter.
     if part.bytes:
       encoded_image = base64.b64encode(part.bytes).decode('utf-8')
       return {
@@ -364,9 +360,9 @@ class OpenRouterModel(processor.Processor):
             f'{e}: {error_detail}', request=e.request, response=e.response
         )
 
-      # Buffer for accumulating function calls across streaming chunks
+      # Buffer for accumulating function calls across streaming chunks.
       accumulated_function_call = {'name': '', 'arguments': ''}
-      
+
       async for line in response.aiter_lines():
         parsed = _parse_sse_line(line)
         if not parsed:
@@ -391,33 +387,41 @@ class OpenRouterModel(processor.Processor):
           )
 
         if function_call := delta.get('function_call'):
-          # Accumulate function call parts across streaming chunks
+          # Accumulate function call parts across streaming chunks.
           if 'name' in function_call:
             accumulated_function_call['name'] += function_call['name']
           if 'arguments' in function_call:
             accumulated_function_call['arguments'] += function_call['arguments']
 
         if finish_reason := choice.get('finish_reason'):
-          # If we have accumulated a function call, yield it when the stream ends
-          if accumulated_function_call['name'] or accumulated_function_call['arguments']:
+          # If we have accumulated a function call, yield it when the stream
+          # ends.
+          if (
+              accumulated_function_call['name']
+              or accumulated_function_call['arguments']
+          ):
             try:
-              # Parse the complete arguments JSON
-              args = json.loads(accumulated_function_call['arguments']) if accumulated_function_call['arguments'] else {}
-              
-              if not accumulated_function_call['name']:
-                raise ValueError("Function call missing name")
-                
-              yield content_api.ProcessorPart(
-                  genai_types.Part.from_function_call(
-                      name=accumulated_function_call['name'],
-                      args=args,
-                  ),
-                  role='model',
-                  metadata=self._build_metadata(parsed),
+              # Parse the complete arguments JSON.
+              args = (
+                  json.loads(accumulated_function_call['arguments'])
+                  if accumulated_function_call['arguments']
+                  else {}
               )
             except (json.JSONDecodeError, ValueError) as e:
-              raise ValueError(f"Incomplete or invalid function call: {e}") from e
-          
+              raise ValueError(f'Invalid function call: {e}') from e
+
+            if not accumulated_function_call['name']:
+              raise ValueError('Function call missing a name')
+
+            yield content_api.ProcessorPart(
+                genai_types.Part.from_function_call(
+                    name=accumulated_function_call['name'],
+                    args=args,
+                ),
+                role='model',
+                metadata=self._build_metadata(parsed),
+            )
+
           yield content_api.ProcessorPart(
               '',
               role='model',
@@ -431,12 +435,9 @@ class OpenRouterModel(processor.Processor):
   def _build_metadata(self, response_data: dict[str, Any]) -> dict[str, Any]:
     """Build metadata from OpenRouter response."""
     metadata = {}
-
-    if 'usage' in response_data:
-      metadata['usage'] = response_data['usage']
-
-    if 'model' in response_data:
-      metadata['model'] = response_data['model']
+    for key in ('usage', 'model'):
+      if key in response_data:
+        metadata[key] = response_data[key]
 
     return metadata
 
