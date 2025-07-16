@@ -6,5 +6,5 @@ We welcome contributions of new Processors that can be shared with the community
 
 ## List of contributed processors
 
-* [Processor name](processor.py): short description.
-* [genai-processors-pydantic](https://github.com/mbeacom/genai-processors-pydantic/): The PydanticValidator is a PartProcessor that validates the JSON content of a ProcessorPart against a specified Pydantic model.
+ * [mbeacom/genai-processors-pydantic](https://github.com/mbeacom/genai-processors-pydantic/): The PydanticValidator is a PartProcessor that validates the JSON content of a ProcessorPart against a specified Pydantic model.
+ <!--- * [Processor name](processor.py): short description. -->
