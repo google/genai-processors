@@ -19,12 +19,14 @@ from __future__ import annotations
 import abc
 import asyncio
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Sequence
+import contextvars
 import functools
 import inspect
 import types
 import typing
 from typing import Any, ParamSpec, Protocol, Self, TypeAlias, overload
 
+from genai_processors import cache
 from genai_processors import content_api
 from genai_processors import context as context_lib
 from genai_processors import map_processor
@@ -1245,3 +1247,84 @@ def yield_exceptions_as_parts(
       )
 
   return wrapper
+
+
+_PROCESSOR_PART_CACHE: contextvars.ContextVar[cache.CacheBase | None] = (
+    contextvars.ContextVar('processor_part_cache', default=None)
+)
+
+
+class CachedPartProcessor(PartProcessor):
+  """A PartProcessor that wraps another PartProcessor with a cache.
+
+  For each incoming part it will write the output to the cache. If the same
+  part is encountered again, the cached result will be used. As PartProcessors
+  handle each part independently, we can cache each part independently too while
+  preserving correct order, streaming behavior and correctly propagating errors
+  on a cache miss.
+
+  The cache to use is bound to a contextvars context and can be set via
+  CachedPartProcessor.set_cache classmethod. This way servers can instantiate
+  processor chain in a constructor but still have separate caches for each
+  request, avoiding cross-talk between users.
+  """
+
+  def __init__(
+      self,
+      part_processor: PartProcessor,
+      *,
+      key_prefix: str | None = None,
+      default_cache: cache.CacheBase | None = None,
+  ):
+    """Initializes the caching wrapper.
+
+    Args:
+      part_processor: The PartProcessor instance to wrap.
+      key_prefix: Optional custom prefix for the cache key. If None, defaults to
+        the key_prefix of the `part_processor_to_cache`.
+      default_cache: The cache to use if one is not set in the context with
+        .set_cache.
+    """
+    self._wrapped_processor = part_processor
+    self.key_prefix = key_prefix or part_processor.key_prefix
+    self._default_cache = default_cache
+
+  @classmethod
+  def set_cache(cls, part_cache: cache.CacheBase) -> None:
+    """Update thread-local cache to be used.
+
+    All CachedPartProcessor within the current contextvars context will use this
+    cache to store and retrieve results.
+
+    Args:
+      part_cache: Cache to use.
+    """
+    _PROCESSOR_PART_CACHE.set(part_cache)
+
+  def match(self, part: ProcessorPart) -> bool:
+    """Matches if the underlying processor matches."""
+    return self._wrapped_processor.match(part)
+
+  async def call(
+      self, part: ProcessorPart
+  ) -> AsyncIterable[ProcessorPartTypes]:
+    part_cache = _PROCESSOR_PART_CACHE.get(self._default_cache)
+
+    if part_cache is not None:
+      part_cache = part_cache.with_key_prefix(self.key_prefix)
+      cached_result = await part_cache.lookup(part)
+
+      if cached_result is not cache.CacheMiss:
+        for p in cached_result.all_parts:
+          yield p
+        return
+
+      results_for_caching = []
+      async for p in self._wrapped_processor(part):
+        results_for_caching.append(p)
+        yield p
+
+      create_task(part_cache.put(part, results_for_caching))
+    else:
+      async for p in self._wrapped_processor(part):
+        yield p
