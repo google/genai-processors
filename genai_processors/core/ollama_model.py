@@ -140,9 +140,9 @@ class OllamaModel(processor.Processor):
     self._keep_alive = keep_alive
 
     if tools := generate_content_config.get('tools'):
+      tool_utils.raise_for_gemini_server_side_tools(tools)
       self._tools = []
       for tool in tools:
-        tool_utils.raise_for_gemini_server_side_tools(tools)
         for fdecl in tool.function_declarations or ():
           if fdecl.parameters:
             parameters = tool_utils.to_schema(
