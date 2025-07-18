@@ -1429,7 +1429,6 @@ class CachedPartProcessorTest(
     async def empty_processor(
         part: content_api.ProcessorPart,
     ) -> AsyncIterable[content_api.ProcessorPart]:
-      del part
       call_tracker()
       # We need to simulate the case where no parts are yielded,
       # while satisfying the type checker.
