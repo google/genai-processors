@@ -1,9 +1,9 @@
 import enum
 import http
 import json
-import unittest
 from unittest import mock
 
+from absl.testing import absltest
 from absl.testing import parameterized
 from genai_processors import content_api
 from genai_processors import processor
@@ -164,7 +164,7 @@ class OllamaProcessorTest(parameterized.TestCase):
       conversation = ['What is the weather in Boston?']
 
       output = processor.apply_sync(model, conversation)
-      self.assertEqual(len(output), 1)  # pylint: disable=g-generic-assert
+      self.assertLen(output, 1)
       self.assertEqual(
           output[0],
           content_api.ProcessorPart.from_function_call(
@@ -187,4 +187,4 @@ class OllamaProcessorTest(parameterized.TestCase):
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()

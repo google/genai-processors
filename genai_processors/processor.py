@@ -26,7 +26,7 @@ import types
 import typing
 from typing import Any, ParamSpec, Protocol, Self, TypeAlias, overload
 
-from genai_processors import cache
+from genai_processors import cache_base
 from genai_processors import content_api
 from genai_processors import context as context_lib
 from genai_processors import map_processor
@@ -1249,7 +1249,7 @@ def yield_exceptions_as_parts(
   return wrapper
 
 
-_PROCESSOR_PART_CACHE: contextvars.ContextVar[cache.CacheBase | None] = (
+_PROCESSOR_PART_CACHE: contextvars.ContextVar[cache_base.CacheBase | None] = (
     contextvars.ContextVar('processor_part_cache', default=None)
 )
 
@@ -1274,7 +1274,7 @@ class CachedPartProcessor(PartProcessor):
       part_processor: PartProcessor,
       *,
       key_prefix: str | None = None,
-      default_cache: cache.CacheBase | None = None,
+      default_cache: cache_base.CacheBase | None = None,
   ):
     """Initializes the caching wrapper.
 
@@ -1290,7 +1290,7 @@ class CachedPartProcessor(PartProcessor):
     self._default_cache = default_cache
 
   @classmethod
-  def set_cache(cls, part_cache: cache.CacheBase) -> None:
+  def set_cache(cls, part_cache: cache_base.CacheBase) -> None:
     """Update thread-local cache to be used.
 
     All CachedPartProcessor within the current contextvars context will use this
@@ -1314,7 +1314,7 @@ class CachedPartProcessor(PartProcessor):
       part_cache = part_cache.with_key_prefix(self.key_prefix)
       cached_result = await part_cache.lookup(part)
 
-      if cached_result is not cache.CacheMiss:
+      if cached_result is not cache_base.CacheMiss:
         for p in cached_result.all_parts:
           yield p
         return

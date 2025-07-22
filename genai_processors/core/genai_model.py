@@ -143,9 +143,18 @@ class GenaiModel(processor.Processor):
   async def call(
       self, content: AsyncIterable[content_api.ProcessorPartTypes]
   ) -> AsyncIterable[content_api.ProcessorPartTypes]:
+    turn = genai_types.Content(parts=[])
     contents = []
     async for content_part in content:
-      contents.append(content_api.to_genai_part(content_part))
+      if turn.role and content_part.role != turn.role:
+        contents.append(turn)
+        turn = genai_types.Content(parts=[])
+
+      turn.role = content_part.role or 'user'
+      turn.parts.append(content_api.to_genai_part(content_part))
+
+    if turn.role:
+      contents.append(turn)
 
     if not contents:
       return

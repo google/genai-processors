@@ -2,6 +2,7 @@ import asyncio
 import unittest
 from unittest import mock
 
+from absl.testing import absltest
 from genai_processors import cache
 from genai_processors import content_api
 
@@ -193,4 +194,4 @@ class InMemoryCacheTest(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()

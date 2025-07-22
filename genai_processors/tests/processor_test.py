@@ -4,6 +4,7 @@ import traceback
 from typing import Sequence, cast
 import unittest
 
+from absl.testing import absltest
 from absl.testing import parameterized
 from genai_processors import cache
 from genai_processors import content_api
@@ -32,7 +33,7 @@ async def _check_is_part(
     yield part
 
 
-class ProcessorPipelineTest(unittest.TestCase):
+class ProcessorPipelineTest(parameterized.TestCase):
 
   def test_sets_debug_substream_name(self):
     result = processor.debug('text')
@@ -257,7 +258,7 @@ class ProcessorPipelineTest(unittest.TestCase):
     result = processor.apply_sync(processor.passthrough(), 'foo')
     self.assertEqual(content_api.as_text(result), 'foo')
     # And the sring has not been split in-to per-letter parts.
-    self.assertEqual(len(result), 1)
+    self.assertLen(result, 1)
 
 
 class PartProcessorTest(unittest.TestCase):
@@ -889,7 +890,7 @@ class ProcessorChainMixTest(TestWithProcessors):
     self.assertEqual(task_count, 2)
 
 
-class ParallelProcessorsTest(TestWithProcessors):
+class ParallelProcessorsTest(TestWithProcessors, parameterized.TestCase):
 
   def test_parallel_processors(self):
     inputs = [content_api.ProcessorPart('1')]
@@ -1105,7 +1106,7 @@ class ParallelProcessorsTest(TestWithProcessors):
         )
     )
     result = processor.apply_sync(p, [content_api.ProcessorPart('0')])
-    self.assertEqual(len(result), 10)
+    self.assertLen(result, 10)
     # The first results should be the status or debug streams before the sleep.
     for i in range(3):
       self.assertIn(result[i].substream_name, ['status', 'debug'])
@@ -1181,7 +1182,7 @@ class ParallelProcessorsTest(TestWithProcessors):
     # processed by them. The // operator implementation ensures that no part is
     # returned then. That's why match is true for the parallel
     # processor but not for the add_one processors.
-    self.assertEqual(len(content), 0)
+    self.assertEmpty(content)
     self.assertEqual(task_count, 0)
 
 
@@ -1268,17 +1269,17 @@ class YieldExceptionsAsPartsTest(
     results = await processor.apply_async(failing_processor, parts)
 
     # We expect three parts back: 'a', 'c', and one error part for 'b'.
-    self.assertEqual(len(results), 3)  # pylint: disable=g-generic-assert
+    self.assertLen(results, 3)
 
     error_parts = [p for p in results if mime_types.is_exception(p.mimetype)]
     successful_parts = [
         p for p in results if not mime_types.is_exception(p.mimetype)
     ]
 
-    self.assertEqual(len(successful_parts), 2)
+    self.assertLen(successful_parts, 2)
     self.assertEqual({p.text for p in successful_parts}, {'a', 'c'})  # pylint: disable=g-generic-assert
 
-    self.assertEqual(len(error_parts), 1)  # pylint: disable=g-generic-assert
+    self.assertLen(error_parts, 1)
     error_part = error_parts[0]
 
     self.assertEqual(error_part.substream_name, processor.STATUS_STREAM)
@@ -1307,7 +1308,7 @@ class YieldExceptionsAsPartsTest(
     parts = get_processor_parts(['a', 'b'])
     results = await processor.apply_async(doubling_processor, parts)
 
-    self.assertEqual(len(results), 4)  # pylint: disable=g-generic-assert
+    self.assertLen(results, 4)
     result_texts = sorted([p.text for p in results])
     self.assertEqual(result_texts, ['a', 'a', 'b', 'b'])
 
@@ -1452,4 +1453,4 @@ class CachedPartProcessorTest(
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()

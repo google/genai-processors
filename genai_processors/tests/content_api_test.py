@@ -1,8 +1,8 @@
 import dataclasses
 import io
 import textwrap
-import unittest
 
+from absl.testing import absltest
 from absl.testing import parameterized
 import dataclasses_json
 from genai_processors import content_api
@@ -386,4 +386,4 @@ class ProcessorContentTest(parameterized.TestCase):
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()

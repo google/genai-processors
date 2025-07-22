@@ -1,6 +1,7 @@
 import unittest
 from unittest import mock
 
+from absl.testing import absltest
 from genai_processors import content_api
 from genai_processors import streams
 from genai_processors.core import live_model
@@ -417,4 +418,4 @@ class LiveModelTest(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()

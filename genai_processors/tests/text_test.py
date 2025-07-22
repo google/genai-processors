@@ -1,5 +1,5 @@
 import dataclasses
-import unittest
+from absl.testing import absltest
 from absl.testing import parameterized
 import dataclasses_json
 from genai_processors import content_api
@@ -82,7 +82,7 @@ class MatchProcessorTest(parameterized.TestCase):
         substream_output='event',
     )
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 4)
+    self.assertLen(output, 4)
     actual = content_api.ProcessorContent(output)
     self.assertEqual(
         actual.as_text(substream_name='event'), '[event: query1][event: query2]'
@@ -141,7 +141,7 @@ class MatchProcessorTest(parameterized.TestCase):
         substream_output='event',
     )
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 7)
+    self.assertLen(output, 7)
     actual = content_api.ProcessorContent(output)
     self.assertEqual(
         actual.as_text(substream_name='event'), '[event: query1][event: query2]'
@@ -158,7 +158,7 @@ class MatchProcessorTest(parameterized.TestCase):
         ['[event: query1][event: query2][event: query3]']
     )
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 3)
+    self.assertLen(output, 3)
     for i in range(3):
       self.assertEqual(
           output[i],
@@ -188,7 +188,7 @@ class MatchProcessorTest(parameterized.TestCase):
         'text post regex',
     ])
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 4)
+    self.assertLen(output, 4)
     self.assertEqual(
         output[2],
         content_api.ProcessorPart(
@@ -229,7 +229,7 @@ class MatchProcessorTest(parameterized.TestCase):
     output = processor.apply_sync(extractor, input_content)
     actual = content_api.ProcessorContent(output)
     self.assertEqual(actual.as_text(substream_name=''), '\n \n')
-    self.assertEqual(len(output), 8)
+    self.assertLen(output, 8)
     self.assertEqual(
         output[5],
         content_api.ProcessorPart(
@@ -250,7 +250,7 @@ class MatchProcessorTest(parameterized.TestCase):
         """```start\nagent_3()\nagent_4()```\n""",
     ])
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 5)
+    self.assertLen(output, 5)
     actual = content_api.ProcessorContent(output)
     self.assertEqual(
         actual.as_text(substream_name='block'),
@@ -298,7 +298,7 @@ class MatchProcessorTest(parameterized.TestCase):
         content_api.ProcessorPart(b'c', mimetype='image/png'),
     ]
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 5)
+    self.assertLen(output, 5)
     self.assertEqual(
         output,
         [
@@ -336,7 +336,7 @@ class MatchProcessorTest(parameterized.TestCase):
         content_api.ProcessorPart('text_c]', substream_name='input'),
     ]
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 6)
+    self.assertLen(output, 6)
     self.assertEqual(
         output,
         [
@@ -375,7 +375,7 @@ class MatchProcessorTest(parameterized.TestCase):
         content_api.ProcessorPart('text_c]', substream_name='input'),
     ]
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), len(input_content) + 1)
+    self.assertLen(output, len(input_content) + 1)
     self.assertEqual(
         output,
         input_content
@@ -434,7 +434,7 @@ class MatchProcessorTest(parameterized.TestCase):
         'postfix',
     ])
     output = processor.apply_sync(extractor, input_content)
-    self.assertEqual(len(output), 7)
+    self.assertLen(output, 7)
     self.assertEqual(
         output[2],
         content_api.ProcessorPart(
@@ -497,4 +497,4 @@ class UrlExtractorTest(parameterized.TestCase):
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()

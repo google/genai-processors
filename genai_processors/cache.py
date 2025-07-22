@@ -14,31 +14,24 @@
 # ==============================================================================
 """Low-level `ProcessorContent` caching implementation for processors.
 
-NOTE: This module is a work-in-progress, which contains the low-level
-implementation that will be leveraged by caching processors.
-
-DO NOT USE DIRECTLY as the interface may change.
+Please don't use Caches directly, but instead wrap your processors with
+processor.CachedPartProcessor.
 """
 
-import abc
 import asyncio
 from collections.abc import Callable
 import json
 from typing import Optional
 
 import cachetools
+from genai_processors import cache_base
 from genai_processors import content_api
 from typing_extensions import override
 import xxhash
 
 
-# Using CacheMiss = object() as a sentinel value doesn't play nicely with typing
-class CacheMiss:
-  """Sentinel value to represent a cache miss."""
-
-
-CacheMissT = type[CacheMiss]
-
+CacheMiss = cache_base.CacheMiss
+CacheMissT = cache_base.CacheMissT
 ProcessorContentTypes = content_api.ProcessorContentTypes
 ProcessorContent = content_api.ProcessorContent
 
@@ -82,31 +75,7 @@ def _deserialize_content(data_bytes: bytes) -> ProcessorContent:
   ])
 
 
-class CacheBase(abc.ABC):
-  """Abstract base class for a cache for ProcessorContent."""
-
-  @abc.abstractmethod
-  async def lookup(
-      self, query: ProcessorContentTypes
-  ) -> ProcessorContent | CacheMissT:
-    """Looks up a ProcessorContent-like value in the cache for a given query."""
-
-  @abc.abstractmethod
-  async def put(
-      self, query: ProcessorContentTypes, value: ProcessorContentTypes
-  ) -> None:
-    """Puts a ProcessorContent value into the cache for a given query."""
-
-  @abc.abstractmethod
-  async def remove(self, query: ProcessorContentTypes) -> None:
-    """Removes a value from the cache for a given query."""
-
-  @abc.abstractmethod
-  def with_key_prefix(self, prefix: str) -> 'CacheBase':
-    """Creates a new Cache instance where generated string keys are prefixed."""
-
-
-class InMemoryCache(CacheBase):
+class InMemoryCache(cache_base.CacheBase):
   """An in-memory cache with TTL and size limits, specifically for caching `ProcessorContent`."""
 
   @override

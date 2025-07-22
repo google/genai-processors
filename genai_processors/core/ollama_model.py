@@ -242,9 +242,7 @@ class OllamaModel(processor.Processor):
         if message.get('content'):
           if self._strip_quotes:
             message['content'] = message['content'].replace('"', '')
-          yield content_api.ProcessorPart(
-              message['content'], role=message['role'].upper()
-          )
+          yield content_api.ProcessorPart(message['content'], role='model')
         if tool_calls := message.get('tool_calls'):
           for tool_call in tool_calls:
             yield processor.ProcessorPart.from_function_call(
@@ -253,7 +251,7 @@ class OllamaModel(processor.Processor):
             )
         for image in message.get('images', ()):
           yield content_api.ProcessorPart(
-              image, mimetype='image/*', role=message.role.upper()
+              image, mimetype='image/*', role='model'
           )
 
 
@@ -262,7 +260,11 @@ def _to_ollama_message(
 ) -> dict[str, Any]:
   """Returns Ollama message JSON."""
   # Gemini API uses upper case for roles, while Ollama uses lower case.
-  message: dict[str, Any] = {'role': part.role.lower() or default_role.lower()}
+  role = part.role.lower() or default_role
+  if role == 'model':
+    role = 'assistant'
+
+  message: dict[str, Any] = {'role': role}
 
   if part.function_call:
     message.setdefault('tool_calls', []).append({

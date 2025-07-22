@@ -1,15 +1,15 @@
 import concurrent.futures
 import time
-import unittest
 from unittest import mock
 
+from absl.testing import absltest
 from genai_processors import content_api
 from genai_processors import processor
 from genai_processors.core import pdf
 from PIL import Image
 
 
-class PDFExtractTest(unittest.TestCase):
+class PDFExtractTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -23,7 +23,7 @@ class PDFExtractTest(unittest.TestCase):
         self.pdf_processor.to_processor(), [part]
     )
 
-    self.assertEqual(len(processed_parts), 1)
+    self.assertLen(processed_parts, 1)
     self.assertEqual(processed_parts[0], part)
 
   @mock.patch('pypdfium2.PdfDocument')
@@ -144,4 +144,4 @@ class PDFExtractTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-  unittest.main()
+  absltest.main()
