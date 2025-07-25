@@ -61,11 +61,26 @@ class ProcessorPartTest(parameterized.TestCase):
         role='user',
     )
     # Enforce that the role is always MODEL for tool cancellation.
-    self.assertEqual(part.role, 'MODEL')
+    self.assertEqual(part.role, 'model')
     self.assertEqual(part.tool_cancellation, 'foo')
 
     part = content_api.ProcessorPart('bar')
     self.assertIsNone(part.tool_cancellation)
+
+  def test_from_bytes_with_text_mimetype(self):
+    bytes_data = b'hello'
+    mimetype = 'text/plain'
+    part = content_api.ProcessorPart(bytes_data, mimetype=mimetype)
+    self.assertEqual(part.text, 'hello')
+    self.assertEqual(part.part.text, 'hello')
+
+  def test_from_bytes_with_non_text_mimetype(self):
+    bytes_data = b'hello'
+    mimetype = 'application/octet-stream'
+    part = content_api.ProcessorPart(bytes_data, mimetype=mimetype)
+    self.assertEqual(part.bytes, bytes_data)
+    self.assertEqual(part.part.inline_data.data, bytes_data)
+    self.assertEqual(part.part.inline_data.mime_type, mimetype)
 
 
 class ProcessorContentTest(parameterized.TestCase):

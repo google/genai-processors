@@ -141,7 +141,7 @@ async def run_conversation() -> None:
   # mic -> speech to text -> text conversation -> text to speech -> play audio
   conversation_agent = (
       input_processor
-      + realtime.LiveModelProcessor(turn_processor=genai_processor + tts)
+      + realtime.LiveProcessor(turn_processor=genai_processor + tts)
       + play_output
   )
 

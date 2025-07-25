@@ -85,7 +85,12 @@ class ProcessorPart:
               'MIME type must be specified when constructing a ProcessorPart'
               ' from bytes.'
           )
-        self._part = genai_types.Part.from_bytes(data=value, mime_type=mimetype)
+        if is_text(mimetype):
+          self._part = genai_types.Part(text=value.decode('utf-8'))
+        else:
+          self._part = genai_types.Part.from_bytes(
+              data=value, mime_type=mimetype
+          )
       case PIL.Image.Image():
         if mimetype:
           # If the mimetype is explicitly specified, ensure it is an image.
@@ -363,7 +368,7 @@ class ProcessorPart:
   ) -> 'ProcessorPart':
     """Constructs a ProcessorPart from a tool cancellation id.
 
-    The role is overridden to MODEL.
+    The role is overridden to 'model'.
 
     Args:
       function_call_id: The id of the function call to be cancelled.
@@ -376,13 +381,13 @@ class ProcessorPart:
         name='tool_cancellation',
         response={'function_call_id': function_call_id},
     )
-    if 'role' in kwargs and kwargs['role'].upper() != 'MODEL':
+    if 'role' in kwargs and kwargs['role'].lower() != 'model':
       logging.warning(
           'Role {kwargs["role"]} is not supported for tool cancellation.'
           ' Overriding it with the model role.'
       )
     extra_args = kwargs
-    extra_args['role'] = 'MODEL'
+    extra_args['role'] = 'model'
     return cls(part, **extra_args)
 
   @classmethod
@@ -584,12 +589,12 @@ class ProcessorContent:
     return sum(1 for _ in self)
 
 
-END_OF_TURN = ProcessorPart('', role='user', metadata={'end_of_turn': True})
+END_OF_TURN = ProcessorPart('', role='user', metadata={'turn_complete': True})
 
 
 def is_end_of_turn(part: ProcessorPart) -> bool:
-  """Returns the end of turn event if the part is an end of turn event."""
-  if part.role == 'user' and part.get_metadata('end_of_turn'):
+  """Returns whether the part is an end of turn event."""
+  if part.get_metadata('turn_complete'):
     return True
   return False
 

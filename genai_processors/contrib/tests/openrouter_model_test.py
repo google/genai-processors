@@ -95,7 +95,7 @@ class OpenRouterModelTest(parameterized.TestCase):
     # Check that the last part has the correct metadata.
     last_part = output[-1]
     self.assertEqual(last_part.metadata['finish_reason'], 'stop')
-    self.assertEqual(last_part.metadata['end_of_turn'], True)
+    self.assertEqual(last_part.metadata['turn_complete'], True)
     self.assertEqual(last_part.metadata['model'], 'openai/gpt-4o')
     self.assertEqual(last_part.metadata['usage']['total_tokens'], 9)
 

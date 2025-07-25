@@ -62,7 +62,7 @@ class VideoInTest(parameterized.TestCase, unittest.IsolatedAsyncioTestCase):
       # that the image bytes are not empty.
       self.assertEqual(output[1].mimetype, 'image/jpeg')
       self.assertEqual(output[1].substream_name, substream_name)
-      self.assertEqual(output[1].role, 'USER')
+      self.assertEqual(output[1].role, 'user')
       self.assertIsInstance(output[1].part.inline_data.data, bytes)
       self.assertGreater(len(output[1].part.inline_data.data), 500)
 

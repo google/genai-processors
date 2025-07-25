@@ -428,7 +428,7 @@ class OpenRouterModel(processor.Processor):
               metadata={
                   **self._build_metadata(parsed),
                   'finish_reason': finish_reason,
-                  'end_of_turn': True,
+                  'turn_complete': True,
               },
           )
 
