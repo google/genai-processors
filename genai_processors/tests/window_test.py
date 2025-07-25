@@ -1,5 +1,7 @@
 import asyncio
+import collections
 from collections.abc import AsyncIterable
+import time
 import unittest
 
 from absl.testing import absltest
@@ -129,6 +131,39 @@ class WindowProcessorTest(unittest.IsolatedAsyncioTestCase):
     )
     actual = content_api.as_text(output_parts)
     self.assertEqual(actual, 'model(1)model(2)')
+
+
+class HistoryCompressionTest(absltest.TestCase):
+
+  def test_drop_old_parts(self):
+    now = time.perf_counter()
+    policy = window.drop_old_parts(age_sec=10)
+    history = collections.deque()
+    history.append(ProcessorPart('a', metadata={'capture_time': now - 15}))
+    history.append(ProcessorPart('b', metadata={'capture_time': now - 5}))
+    history.append(ProcessorPart('c', metadata={'capture_time': now}))
+
+    asyncio.run(policy(history))
+
+    self.assertLen(history, 2)
+    self.assertEqual(history[0].text, 'b')
+    self.assertEqual(history[1].text, 'c')
+
+  def test_keep_last_n_turns(self):
+    policy = window.keep_last_n_turns(turns_to_keep=2)
+    history = collections.deque()
+    history.append(ProcessorPart('a'))
+    history.append(content_api.END_OF_TURN)
+    history.append(ProcessorPart('b'))
+    history.append(content_api.END_OF_TURN)
+    history.append(ProcessorPart('c'))
+
+    asyncio.run(policy(history))
+
+    self.assertLen(history, 3)
+    self.assertEqual(history[0].text, 'b')
+    self.assertEqual(history[1], content_api.END_OF_TURN)
+    self.assertEqual(history[2].text, 'c')
 
 
 if __name__ == '__main__':

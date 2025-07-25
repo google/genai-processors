@@ -16,8 +16,11 @@
 
 import asyncio
 from collections.abc import AsyncIterable, Callable
+import dataclasses
 import re
-from typing import Type
+from typing import Mapping, Type
+
+import dataclasses_json
 from genai_processors import content_api
 from genai_processors import processor
 
@@ -298,8 +301,20 @@ class MatchProcessor(processor.Processor):
       )
 
 
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(frozen=True)
+class FetchRequest:
+  """Dataclass to represent a request to fetch a document by a URL."""
+
+  url: str
+
+
 class UrlExtractor(MatchProcessor):
   """Replaces encountered text URLs with strongly typed Parts.
+
+  Also see core/web.py for the infrastructure to fetch the extracted URLs.
+  Alternatively see core/github.py for a processor that provides a tailored
+  handling for github URLs.
 
   In some scenarios it is useful to replace URLs mentioned in the prompt with
   the content they point to. In many cases it can be handled by tool calls, but
@@ -311,27 +326,29 @@ class UrlExtractor(MatchProcessor):
   special MIME type to avoid fetching them unintentionally. And a separate
   processor should decide which URLs should be processed.
 
-  This processor turns each URL in the prompt text in-to that Part with a
-  special MIME type. Define a dataclass for each URL:
+  Usage:
+    In the basic case use UrlExtractor() without arguments and handle
+    FetchRequest parts produced. Alternatively you can define separate
+    dataclasses for specific URL prefixes:
 
-    @dataclasses_json.dataclass_json
-    @dataclasses.dataclass(frozen=True)
-    class YouTubeUrl:
-      url: str
+      @dataclasses_json.dataclass_json
+      @dataclasses.dataclass(frozen=True)
+      class YouTubeUrl:
+        url: str
 
-  And then tell UrlExtractor to extract them:
+    And then tell UrlExtractor to extract them:
 
-    UrlExtractor({
-        'https://youtube.': YouTubeUrl,
-        'https://github.com': GithubUrl
-    })
+      UrlExtractor({
+          'https://youtube.': YouTubeUrl,
+          'https://github.com': GithubUrl
+      })
 
-  Note that all URLs must have the same scheme to allow efficient matching.
+    Note that all URLs must have the same scheme to allow efficient matching.
   """
 
   def __init__(
       self,
-      urls: dict[str, Type],  # pylint: disable=g-bare-generic
+      urls: Mapping[str, Type] | None = None,  # pylint: disable=g-bare-generic
       *,
       substream_input: str = '',
       substream_output: str = '',
@@ -343,15 +360,23 @@ class UrlExtractor(MatchProcessor):
       substream_input: name of the substream to use for the input part.
       substream_output: name of the substream to use for the extracted part.
     """
-    scheme = None
+    if urls is None:
+      urls = {'http://': FetchRequest, 'https://': FetchRequest}
+
+    schemes = set()
     for prefix in urls.keys():
-      next_scheme = prefix.split(':')[0]
-      if scheme and scheme != next_scheme:
-        raise ValueError(
-            'All URL prefixes must have the same scheme e.g. https. Got'
-            f' {scheme!r} and {next_scheme!r}'
-        )
-      scheme = next_scheme
+      scheme = prefix.split(':')[0]
+      if scheme == 'https':
+        # Allow mixing http and https URLs.
+        # This works because http is a prefix of https.
+        scheme = 'http'
+      schemes.add(scheme)
+
+    if len(schemes) != 1:
+      raise ValueError(
+          'All URL prefixes must have the same scheme e.g. https. Got'
+          f' {schemes!r}'
+      )
 
     def transform(part: content_api.ProcessorPart):
       for prefix, dataclass in urls.items():
@@ -363,10 +388,13 @@ class UrlExtractor(MatchProcessor):
           )
 
     super().__init__(
-        pattern='('
-        + '|'.join(urls.keys())
-        + ")[0-9a-zA-Z$\\-_\\.\\+!*'\\(\\);/\\?:@=&]*",
-        word_start=scheme,
+        pattern=re.compile(
+            '('
+            + '|'.join(urls.keys())
+            + r')([^\s<>"\'\u200B]*[^\s<>"\'\u200B\.\,])?',
+            re.IGNORECASE,
+        ),
+        word_start=next(iter(schemes)),
         substream_input=substream_input,
         substream_output=substream_output,
         remove_from_input_stream=True,

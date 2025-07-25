@@ -101,7 +101,6 @@ TEXT_JSON = 'application/json'
 TEXT_ENUM = 'text/x.enum'
 
 INPUT_TEXT_TYPES = [
-    TEXT_PDF,
     TEXT_PLAIN,
     TEXT_CSV,
     TEXT_HTML,

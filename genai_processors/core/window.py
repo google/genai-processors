@@ -123,12 +123,7 @@ class RollingPrompt:
             ' simultaneously.'
         )
 
-      async def remove_old_parts(history: collections.deque[ProcessorPart]):
-        time_cut_point = time.perf_counter() - duration_prompt_sec
-        while history and history[0].metadata['capture_time'] < time_cut_point:
-          history.popleft()
-
-      self._compress_history = remove_old_parts
+      self._compress_history = drop_old_parts(duration_prompt_sec)
 
   def add_part(
       self,
@@ -183,6 +178,45 @@ class RollingPrompt:
     await self._compress_history(self._conversation_history)
     for part in self._conversation_history:
       self._pending.put_nowait(part)
+
+
+def drop_old_parts(
+    age_sec: float,
+) -> Callable[[collections.deque[ProcessorPart]], Awaitable[None]]:
+  """A history compression policy that drops parts older than `age_sec`."""
+
+  async def policy(history: collections.deque[ProcessorPart]):
+    time_cut_point = time.perf_counter() - age_sec
+    while history and history[0].metadata['capture_time'] < time_cut_point:
+      history.popleft()
+
+  return policy
+
+
+def keep_last_n_turns(
+    turns_to_keep: int,
+) -> Callable[[collections.deque[ProcessorPart]], Awaitable[None]]:
+  """Returns a history compression policy that keeps turns_to_keep last turns.
+
+  Args:
+    turns_to_keep: How many turns to keep, including the turn that comes after
+      the policy is applied.
+  """
+
+  async def policy(history: collections.deque[ProcessorPart]):
+    turns = 0
+    for part in history:
+      if content_api.is_end_of_turn(part):
+        turns += 1
+
+    turns_to_drop = turns + 1 - turns_to_keep
+
+    while turns_to_drop > 0:
+      if content_api.is_end_of_turn(history[0]):
+        turns_to_drop -= 1
+      history.popleft()
+
+  return policy
 
 
 class Window(Processor):

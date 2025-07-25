@@ -31,7 +31,7 @@ class PDFExtractTest(absltest.TestCase):
     """Test that PDF parts with no images are processed correctly."""
     mock_page = mock.Mock()
     mock_page.get_objects.return_value = []
-    mock_page.get_textpage.return_value.get_text_range.return_value = (
+    mock_page.get_textpage.return_value.get_text_bounded.return_value = (
         'page text'
     )
     mock_pdf_document.return_value.__iter__.return_value = [mock_page]
@@ -62,7 +62,7 @@ class PDFExtractTest(absltest.TestCase):
     """Test that PDF parts with images are processed correctly."""
     mock_page = mock.Mock()
     mock_page.get_objects.return_value = [mock.Mock()]
-    mock_page.get_textpage.return_value.get_text_range.return_value = (
+    mock_page.get_textpage.return_value.get_text_bounded.return_value = (
         'page text'
     )
     mock_page.render.return_value.to_pil.return_value = Image.new(
@@ -102,7 +102,7 @@ class PDFExtractTest(absltest.TestCase):
     """Test that multiple PDF parts processed correctly in parallel."""
     mock_page = mock.Mock()
     mock_page.get_objects.return_value = []
-    mock_page.get_textpage.return_value.get_text_range.return_value = (
+    mock_page.get_textpage.return_value.get_text_bounded.return_value = (
         'page text'
     )
 

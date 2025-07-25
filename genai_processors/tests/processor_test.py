@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterable
+import time
 import traceback
 from typing import Sequence, cast
 import unittest
@@ -527,6 +528,26 @@ class ProcessorChainMixTest(TestWithProcessors):
         ['2', '2', '1', '1', '2', '2', '0', '0']
     )
 
+  @staticmethod
+  @processor.processor_function
+  async def _noop(
+      content: AsyncIterable[content_api.ProcessorPart],
+  ) -> AsyncIterable[content_api.ProcessorPart]:
+    async for part in content:
+      yield part
+
+  class _Slowpoke(processor.PartProcessor):
+
+    def __init__(self, slow_part: str):
+      self._slow_part = slow_part
+
+    async def call(
+        self, part: content_api.ProcessorPart
+    ) -> AsyncIterable[content_api.ProcessorPart]:
+      if part.text == self._slow_part:
+        await asyncio.sleep(0.1)
+      yield part
+
   def test_processor_plus_processor(self):
 
     class TwiceAgain(processor.Processor):
@@ -888,6 +909,101 @@ class ProcessorChainMixTest(TestWithProcessors):
     content = processor.apply_sync(chain, get_processor_parts(['0']))
     self.assertEqual(content, get_processor_parts(['2', '1', '2', '011']))
     self.assertEqual(task_count, 2)
+
+  def test_chain_processor_run_in_parallel(self):
+    numbers = [str(i) for i in range(100)]
+
+    p = sum((self._Slowpoke(n) for n in numbers), self._noop)
+
+    start = time.time()
+    self.assertEqual(
+        content_api.as_text(processor.apply_sync(p, numbers)), ''.join(numbers)
+    )
+    end = time.time()
+    self.assertLess(end - start, 5)
+
+  def test_minimal_fusion_case(self):
+    p = self._noop + self._Slowpoke('0') + self._Slowpoke('1')
+    inputs = get_processor_parts(['0', '1'])
+
+    start = time.time()
+    processor.apply_sync(p, inputs)
+    end = time.time()
+
+    # Should take ~0.1s (for one of the Slowpokes), not 0.2s.
+    self.assertLess(end - start, 0.15)
+
+  def test_mixed_chain_fusion_is_broken_by_processor(self):
+    """Tests Processor + PP + PP + Processor + PP runs in correct stages."""
+    # S1 and S2 should fuse.
+    # The second noop breaks the chain.
+    # S3 is a new stage.
+    # Stage 1: fused(S1, S2) runs concurrently (~0.1s)
+    # Stage 2: S3 runs (~0.1s)
+    # Total time should be ~0.2s, proving two separate concurrent stages.
+    p = (
+        self._noop
+        + self._Slowpoke('1')
+        + self._Slowpoke('2')
+        + self._noop
+        + self._Slowpoke('3')
+    )
+    inputs = get_processor_parts(['1', '2', '3'])
+
+    start = time.time()
+    processor.apply_sync(p, inputs)
+    end = time.time()
+
+    # Execution time should be > 0.15s (more than one stage) but < 0.5s (not
+    # fully sequential).
+    self.assertGreater(end - start, 0.15)
+    self.assertLess(end - start, 0.5)
+
+  def test_chain_starts_with_part_processor(self):
+    """Tests that a PartProcessor followed by a Processor chains correctly."""
+    p = self.insert_1 + self.twice
+    inputs = get_processor_parts(['0'])
+    result = processor.apply_sync(p, inputs)
+    self.assertEqual(result, get_processor_parts(['1', '1', '0', '0']))
+
+  def test_chain_part_processor_flattens_correctly(self):
+    """Tests that `_ChainPartProcessor` + `PartProcessor` flattens the list."""
+
+    @processor.part_processor_function
+    async def proc_a(
+        p: content_api.ProcessorPart,
+    ) -> AsyncIterable[content_api.ProcessorPart]:
+      yield p
+
+    @processor.part_processor_function
+    async def proc_b(
+        p: content_api.ProcessorPart,
+    ) -> AsyncIterable[content_api.ProcessorPart]:
+      yield p
+
+    @processor.part_processor_function
+    async def proc_c(
+        p: content_api.ProcessorPart,
+    ) -> AsyncIterable[content_api.ProcessorPart]:
+      yield p
+
+    # Step 1: `a + b` creates a _ChainPartProcessor
+    chain_ab = proc_a + proc_b
+    self.assertIsInstance(chain_ab, processor._ChainPartProcessor)
+    self.assertEqual(len(chain_ab._processor_list), 2)
+
+    # Step 2: `(a + b) + c` should result in a flattened chain
+    chain_abc = chain_ab + proc_c
+    self.assertIsInstance(chain_abc, processor._ChainPartProcessor)
+
+    self.assertEqual(len(chain_abc._processor_list), 3)
+    self.assertIs(chain_abc._processor_list[0], proc_a)
+    self.assertIs(chain_abc._processor_list[1], proc_b)
+    self.assertIs(chain_abc._processor_list[2], proc_c)
+
+    inputs = [content_api.ProcessorPart('test')]
+    content = processor.apply_sync(chain_abc, inputs)
+    self.assertEqual(content, inputs)
 
 
 class ParallelProcessorsTest(TestWithProcessors, parameterized.TestCase):

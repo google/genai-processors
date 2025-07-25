@@ -71,9 +71,11 @@ def _key_prefix(
 
 
 def _combined_key_prefix(
-    fn_list: Sequence[ProcessorFn | PartProcessorFn],
+    processor_list: Sequence[
+        Processor | PartProcessor | ProcessorFn | PartProcessorFn
+    ],
 ) -> str:
-  return ','.join(map(_key_prefix, fn_list))
+  return ','.join(map(_key_prefix, processor_list))
 
 
 async def _normalize_part_stream(
@@ -207,13 +209,9 @@ class Processor(abc.ABC):
     Returns:
       The chain of this process with `other`.
     """
-    if isinstance(other, PartProcessor):
-      return _ChainProcessor([self.call, other.to_processor().call])
-    elif isinstance(other, _ChainProcessor):
-      return _ChainProcessor([self.call] + other._processor_list)
-    else:
-      other: Processor = other  # Make pytype happy.
-      return _ChainProcessor([self.call, other.call])
+    if isinstance(other, _ChainProcessor):
+      return _ChainProcessor([self] + other._processors)
+    return _ChainProcessor([self, other])
 
 
 @typing.runtime_checkable
@@ -328,14 +326,12 @@ class PartProcessor(abc.ABC):
     Returns:
       The chain of this process with `other`.
     """
-    if isinstance(other, _ChainPartProcessor):
-      return _ChainPartProcessor([self] + other._processor_list)
-    elif isinstance(other, _ChainProcessor):
-      return _ChainProcessor([self.to_processor().call] + other._processor_list)
-    elif isinstance(other, Processor):
-      return _ChainProcessor([self.to_processor().call, other])
-    else:
+    if isinstance(other, PartProcessor):
+      if isinstance(other, _ChainPartProcessor):
+        return _ChainPartProcessor([self] + other._processor_list)
       return _ChainPartProcessor([self, other])
+
+    return _ChainProcessor([self, other])
 
   def __floordiv__(self, other: Self | Processor) -> PartProcessor | Processor:
     """Make `other` be computed in parallel to this processor.
@@ -661,13 +657,7 @@ class _ChainPartProcessor(PartProcessor):
           *self._processor_list,
           other,
       ])
-    other: Processor = other  # Make pytype happy.
-    if isinstance(other, _ChainProcessor):
-      return _ChainProcessor([self.to_processor().call, *other._processor_list])
-    elif not self._processor_list:
-      return _ChainProcessor([other.call])
-    else:
-      return _ChainProcessor([self.to_processor().call, other.call])
+    return _ChainProcessor([self, other])
 
   def match(self, part: ProcessorPart) -> bool:
     return any(p.match(part) for p in self._processor_list)
@@ -714,22 +704,42 @@ class _ProcessorWrapper(Processor):
 
 
 class _ChainProcessor(Processor):
-  """Chain of processors."""
+  """Chain of processors that fuses consecutive PartProcessors."""
 
   def __init__(
       self,
-      processor_list: Sequence[ProcessorFn],
+      processor_list: Sequence[Processor | PartProcessor],
   ):
-    self._processor_list = list(processor_list)
+    fused_processors: list[Processor | PartProcessor] = []
+    for p in processor_list:
+      if (
+          isinstance(p, PartProcessor)
+          and fused_processors
+          and isinstance(fused_processors[-1], PartProcessor)
+      ):
+        fused_processors[-1] = fused_processors[-1] + p
+      else:
+        fused_processors.append(p)
+    self._processors = fused_processors
 
-  def __add__(self, other: Processor | PartProcessor) -> Processor:
-    if isinstance(other, _ChainProcessor):
-      return _ChainProcessor(self._processor_list + other._processor_list)
-    elif isinstance(other, _ChainPartProcessor) and not other._processor_list:
-      return _ChainProcessor(self._processor_list)
-    elif isinstance(other, PartProcessor):
-      return _ChainProcessor([*self._processor_list, other.to_processor().call])
-    return _ChainProcessor([*self._processor_list, other.call])
+    self._processor_list: list[ProcessorFn] = []
+    for p in self._processors:
+      if isinstance(p, PartProcessor):
+        self._processor_list.append(p.to_processor().call)
+      else:
+        self._processor_list.append(p.call)
+
+    self._task_name = (
+        f'_ChainProcessor({_key_prefix(self._processors[0])}...)'
+        if self._processors
+        else '_ChainProcessor(empty)'
+    )
+
+  def __add__(self, other: Processor | PartProcessor) -> _ChainProcessor:
+    other_list = (
+        other._processors if isinstance(other, _ChainProcessor) else [other]
+    )
+    return _ChainProcessor(self._processors + other_list)
 
   async def call(
       self, content: AsyncIterable[ProcessorPart]
@@ -739,10 +749,9 @@ class _ChainProcessor(Processor):
       async for part in content:
         yield part
       return
-    task_name = f'_ChainProcessor({_key_prefix(self._processor_list[0])}...)'
-    async for result in _chain_processors(self._processor_list, task_name)(
-        content
-    ):
+    async for result in _chain_processors(
+        self._processor_list, self._task_name
+    )(content):
       yield result
 
   @functools.cached_property
@@ -827,7 +836,10 @@ class _CaptureReservedSubstreams(PartProcessor):
     if context_lib.is_reserved_substream(part.substream_name):
       await self._queue.put(part)
       return
-    async for part in _normalize_part_stream(self._part_processor_fn(part)):
+    processed_stream: AsyncIterable[ProcessorPart] = _normalize_part_stream(
+        self._part_processor_fn(part)
+    )
+    async for part in processed_stream:
       if context_lib.is_reserved_substream(part.substream_name):
         await self._queue.put(part)
       else:
@@ -1314,7 +1326,7 @@ class CachedPartProcessor(PartProcessor):
       part_cache = part_cache.with_key_prefix(self.key_prefix)
       cached_result = await part_cache.lookup(part)
 
-      if cached_result is not cache_base.CacheMiss:
+      if isinstance(cached_result, ProcessorContent):
         for p in cached_result.all_parts:
           yield p
         return
