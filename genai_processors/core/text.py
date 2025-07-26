@@ -410,6 +410,7 @@ async def terminal_input(
   while True:
     try:
       yield await asyncio.to_thread(input, prompt)
+      yield content_api.END_OF_TURN
     except EOFError:
       # Exit on ctrl+D.
       return

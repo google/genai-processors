@@ -132,6 +132,30 @@ class WindowProcessorTest(unittest.IsolatedAsyncioTestCase):
     actual = content_api.as_text(output_parts)
     self.assertEqual(actual, 'model(1)model(2)')
 
+  async def test_max_concurrency(self):
+    max_concurrency = 2
+    concurrent_executions = 0
+
+    @processor.processor_function
+    async def window_processor(
+        content: AsyncIterable[ProcessorPart],
+    ) -> AsyncIterable[ProcessorPart]:
+      nonlocal concurrent_executions
+      concurrent_executions += 1
+      self.assertLessEqual(concurrent_executions, 1)
+
+      # Simulate some work
+      await asyncio.sleep(0.1)
+      async for part in content:
+        yield part
+
+      concurrent_executions -= 1
+
+    input_stream = streams.stream_content(['1', content_api.END_OF_TURN] * 10)
+    output_parts = await streams.gather_stream(
+        window.Window(window_processor, max_concurrency=1)(input_stream)
+    )
+
 
 class HistoryCompressionTest(absltest.TestCase):
 

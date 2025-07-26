@@ -25,6 +25,7 @@ Also see genai_processors.core.realtime.LiveProcessor for bidirectional
 import asyncio
 import collections
 from collections.abc import AsyncIterable, Awaitable
+import contextlib
 import time
 from typing import Callable
 
@@ -256,6 +257,7 @@ class Window(Processor):
       compress_history: (
           Callable[[collections.deque[ProcessorPart]], Awaitable[None]] | None
       ) = None,
+      max_concurrency: int = 0,
   ):
     """Initializes the window processor.
 
@@ -263,9 +265,15 @@ class Window(Processor):
       window_processor: The processor to invoke on the window.
       compress_history: A callable that takes a deque of ProcessorPart and
         modifies it in place to compress the history.
+      max_concurrency: The maximum number of concurrent window_processor
+        invocations. If 0 or less, concurrency is unlimited.
     """
     self._window_processor = window_processor
     self._compress_history = compress_history
+    if max_concurrency > 0:
+      self._semaphore = asyncio.Semaphore(max_concurrency)
+    else:
+      self._semaphore = contextlib.nullcontext()
 
   async def _consume_content(
       self,
@@ -281,12 +289,17 @@ class Window(Processor):
       prompt_for_window = rolling_prompt.pending()
       single_window_output_queue = asyncio.Queue[ProcessorPart | None]()
       window_results_queue.put_nowait(single_window_output_queue)
-      processor.create_task(
-          streams.enqueue(
-              self._window_processor(prompt_for_window),
-              single_window_output_queue,
-          )
-      )
+
+      async def run_window_processor():
+        async with self._semaphore:
+          try:
+            async for part in self._window_processor(prompt_for_window):
+              await single_window_output_queue.put(part)
+          finally:
+            await single_window_output_queue.put(content_api.END_OF_TURN)
+            await single_window_output_queue.put(None)
+
+      processor.create_task(run_window_processor())
 
     await _create_window_task()
 
