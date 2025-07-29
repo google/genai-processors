@@ -39,13 +39,29 @@ class LangChainModel(processor.Processor):
   def __init__(
       self,
       llm: chat_models.BaseChatModel,
-      system_instruction: Optional[str] = None,
+      *,
+      system_instruction: content_api.ProcessorContentTypes = (),
       prompt_template: Optional[str] = None,
   ):
+    """Initializes the LangChain model.
+
+    Args:
+      llm: LangChain model to use.
+      system_instruction: Instructions for the model to steer it toward better
+        performance. Would be prepended to the prompt with a `system` role.
+      prompt_template: LandChain ChatPromptTemplate to be applied to the prompt
+        before sending it to the LLM.
+    """
     super().__init__()
-    self.llm = llm
-    self.system_instruction = system_instruction or ''
-    self.prompt_template = (
+    self._llm = llm
+    self._model_name = getattr(self._llm, 'model', type(self._llm).__name__)
+
+    self._system_instruction = content_api.ProcessorContent(system_instruction)
+    # Force parts in the system_instruction to have system role.
+    for part in self._system_instruction:
+      part.role = 'system'
+
+    self._prompt_template = (
         ChatPromptTemplate.from_template(prompt_template)
         if prompt_template
         else None
@@ -57,28 +73,27 @@ class LangChainModel(processor.Processor):
     parts: list[content_api.ProcessorPart] = []
     async for part in content_stream:
       parts.append(part)
-    content = content_api.ProcessorContent(parts)
+    content = self._system_instruction + parts
 
     msgs = self._convert_to_langchain_messages(content.all_parts)
-    if self.system_instruction:
-      msgs.insert(
-          0, langchain_messages.SystemMessage(content=self.system_instruction)
-      )
 
     payload = (
-        {'input': self.prompt_template.format(messages=msgs)}
-        if self.prompt_template
+        {'input': self._prompt_template.format(messages=msgs)}
+        if self._prompt_template
         else msgs
     )
 
-    async for chunk in self.llm.astream(payload):
-      model_name = getattr(self.llm, 'model', type(self.llm).__name__)
+    async for chunk in self._llm.astream(payload):
+      if not isinstance(chunk.content, str):
+        raise NotImplementedError(
+            'Multimodal content output is not implemented yet.'
+        )
 
       yield content_api.ProcessorPart(
           chunk.content,
           mimetype='text/plain',
           role='model',
-          metadata={'model': model_name},
+          metadata={'model': self._model_name},
       )
 
   def _convert_to_langchain_messages(
