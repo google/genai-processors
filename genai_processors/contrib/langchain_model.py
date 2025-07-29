@@ -17,6 +17,15 @@ Provides:
  * Turn based, single prompt inference
  * Multimodal input support (text + images)
  * Flexible Jinja-based prompt templating
+
+Tools are currently not supported on GenAI processors level: tool calls and
+responses are not translated beween ProcessorParts and LangChain AIMessages.
+There is no translation between genai.Tool definition and LangChain.
+
+There is no special support for structured / constrained decoding either. You
+can use "json_mode" provided by LangChain but produced ProcessorParts will be
+just streamed text, not structured ProcessorParts like shown in
+notebooks/constrained_decoding.ipynb.
 """
 
 import base64
