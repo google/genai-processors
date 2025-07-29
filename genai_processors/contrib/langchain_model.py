@@ -126,7 +126,7 @@ class LangChainModel(processor.Processor):
     last_part: Optional[content_api.ProcessorPart] = None
 
     def flush():
-      nonlocal content_parts, last_role, last_part
+      nonlocal content_parts
       if content_parts:
         cls = {
             'system': langchain_messages.SystemMessage,
