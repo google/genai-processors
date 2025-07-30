@@ -1197,13 +1197,12 @@ def source(stop_on_first: bool = True) -> _SourceDecorator:
 
 
 def yield_exceptions_as_parts(
-    func: Callable[
-        [PartProcessor, ProcessorPart], AsyncIterable[ProcessorPartTypes]
-    ],
-) -> Callable[
-    [PartProcessor, ProcessorPart], AsyncIterable[ProcessorPartTypes]
-]:
-  """Decorates `PartProcessor.call` to yield exceptions instead of raising them.
+    func: Callable[_ProcessorParamSpec, AsyncIterable[ProcessorPartTypes]],
+) -> Callable[_ProcessorParamSpec, AsyncIterable[ProcessorPartTypes]]:
+  """Decorates a `call` method to yield exceptions instead of raising them.
+
+  This decorator can be applied to the `call` method of both `Processor` and
+  `PartProcessor` classes.
 
     For the Processor pipeline to succeed each processor in it needs to succeed,
     and if there are many of them the probability of failure increases
@@ -1212,8 +1211,10 @@ def yield_exceptions_as_parts(
     To mitigate that we may want to let the model work with the partial results
     by interpreting exceptions as valid results.
 
-    This decorator wraps the `PartProcessor.call` method in a try...except
-    block. If the method raises an exception it is yielded as a special `status`
+    This decorator wraps the `PartProcessor.call` or `Processor.call` method in
+    a try...except block.
+
+    If the method raises an exception it is yielded as a special `status`
     `ProcessorPart` that the next processors in the pipeline can interpret.
 
     To be model-friendly, we format the exception as a text/x-exception part
@@ -1239,11 +1240,9 @@ def yield_exceptions_as_parts(
   """
 
   @functools.wraps(func)
-  async def wrapper(
-      self: 'PartProcessor', part: ProcessorPart
-  ) -> AsyncIterable[ProcessorPartTypes]:
+  async def wrapper(*args, **kwargs) -> AsyncIterable[ProcessorPartTypes]:
     try:
-      async for item in func(self, part):
+      async for item in func(*args, **kwargs):
         yield item
     except Exception as e:  # pylint: disable=broad-except
       yield ProcessorPart(
