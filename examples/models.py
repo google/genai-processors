@@ -116,6 +116,6 @@ def turn_based_model(
     if not model_name:
       model_name = 'gemini-2.0-flash-lite'
     llm = langchain_google_genai.ChatGoogleGenerativeAI(model=model_name)
-    return LangChainModel(llm=llm, system_instruction=system_instruction)
+    return LangChainModel(model=llm, system_instruction=system_instruction)
 
   raise ValueError(f'{_MODEL_TYPE.value!r} is not supported.')

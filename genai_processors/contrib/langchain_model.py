@@ -47,7 +47,7 @@ class LangChainModel(processor.Processor):
 
   def __init__(
       self,
-      llm: chat_models.BaseChatModel,
+      model: chat_models.BaseChatModel,
       *,
       system_instruction: content_api.ProcessorContentTypes = (),
       prompt_template: Optional[ChatPromptTemplate] = None,
@@ -55,15 +55,16 @@ class LangChainModel(processor.Processor):
     """Initializes the LangChain model.
 
     Args:
-      llm: LangChain model to use.
+      model: LangChain model to use.
       system_instruction: Instructions for the model to steer it toward better
-        performance. Would be prepended to the prompt with a `system` role.
+        performance. If provided, the system instruction (SI) is prepended to
+        the prompt, with a `system` role.
       prompt_template: A pre-built LangChain ChatPromptTemplate to format
         messages before passing them to the LLM
     """
     super().__init__()
-    self._llm = llm
-    self._model_name = getattr(self._llm, 'model', type(self._llm).__name__)
+    self._model = model
+    self._model_name = getattr(self._model, 'model', type(self._model).__name__)
 
     self._system_instruction = content_api.ProcessorContent(system_instruction)
     # Force parts in the system_instruction to have system role.
@@ -88,7 +89,7 @@ class LangChainModel(processor.Processor):
         else msgs
     )
 
-    async for chunk in self._llm.astream(payload):
+    async for chunk in self._model.astream(payload):
       if not isinstance(chunk.content, str):
         raise NotImplementedError(
             'Multimodal content output is not implemented yet.'

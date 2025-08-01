@@ -40,7 +40,7 @@ class LangChainModelTest(
     mock_llm.astream.return_value = streams.stream_content(
         [MockChunk('Hello'), MockChunk(' world')]
     )
-    proc = LangChainModel(llm=mock_llm)
+    proc = LangChainModel(model=mock_llm)
     output = processor.apply_sync(proc, ['Hi there'])
 
     self.assertLen(output, 2)
@@ -57,7 +57,7 @@ class LangChainModelTest(
     mock_llm.astream.return_value = streams.stream_content(
         [MockChunk('A'), MockChunk('B'), MockChunk('C')]
     )
-    proc = LangChainModel(llm=mock_llm)
+    proc = LangChainModel(model=mock_llm)
     output = processor.apply_sync(proc, ['Question 1', 'Question 2'])
 
     self.assertEqual(content_api.as_text(output), 'ABC')
@@ -70,7 +70,7 @@ class LangChainModelTest(
         [MockChunk('mocked')]
     )
 
-    proc = LangChainModel(llm=mock_llm)
+    proc = LangChainModel(model=mock_llm)
 
     async def input_stream():
       yield content_api.ProcessorPart(
@@ -121,7 +121,7 @@ class LangChainModelTest(
     If multiple fragments are present the order must be preserved.
     """
     mock_llm = mock.Mock(model='mock-model')
-    proc = LangChainModel(llm=mock_llm)
+    proc = LangChainModel(model=mock_llm)
 
     parts = [
         content_api.ProcessorPart(
@@ -163,7 +163,7 @@ class LangChainModelTest(
   def test_single_text_message_conversion(self):
     """A single text part is converted to a string-based LangChain message."""
     mock_llm = mock.Mock(model='mock-model')
-    proc = LangChainModel(llm=mock_llm)
+    proc = LangChainModel(model=mock_llm)
 
     parts = [
         content_api.ProcessorPart(
@@ -187,7 +187,7 @@ class LangChainModelTest(
         [MockChunk('Response')]
     )
     proc = LangChainModel(
-        llm=mock_llm, system_instruction='You are a helpful AI.'
+        model=mock_llm, system_instruction='You are a helpful AI.'
     )
 
     parts = [
@@ -214,7 +214,7 @@ class LangChainModelTest(
     prompt_template = [('system', 'Be funny.'), ('placeholder', '{messages}')]
     # Equivalently:'User input: {messages}'
     proc = LangChainModel(
-        llm=mock_llm,
+        model=mock_llm,
         prompt_template=ChatPromptTemplate(prompt_template),
     )
 
@@ -246,7 +246,7 @@ class LangChainModelTest(
   def test_unsupported_mimetype_raises(self, mime_type, raw_data):
     """Unsupported MIME types should raise a ValueError."""
     mock_llm = mock.Mock(model='mock-model')
-    proc = LangChainModel(llm=mock_llm)
+    proc = LangChainModel(model=mock_llm)
 
     bad_parts = [
         content_api.ProcessorPart(
