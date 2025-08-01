@@ -219,9 +219,7 @@ class ProcessorPart:
     Raises:
       ValueError if part has no text.
     """
-    if not mime_types.is_text(self.mimetype) and not mime_types.is_json(
-        self.mimetype
-    ):
+    if not mime_types.is_text(self.mimetype):
       raise ValueError('Part is not text.')
     return self.part.text or ''
 

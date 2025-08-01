@@ -119,12 +119,16 @@ TEXT_EXCEPTION = 'text/x-exception'
 
 def is_text(mime: str) -> bool:
   """Returns whether the content is a human-readable text."""
-  return mime in INPUT_TEXT_TYPES or mime.startswith('text/')
+  return (
+      mime in INPUT_TEXT_TYPES
+      or mime.startswith('text/')
+      or mime.startswith(TEXT_JSON)
+  )
 
 
 def is_json(mime: str) -> bool:
   """Returns whether the content is a human-readable json."""
-  return mime == TEXT_JSON or mime.startswith(TEXT_JSON)
+  return mime.startswith(TEXT_JSON)
 
 
 def is_dataclass(mime: str, json_dataclass: type[Any] | None = None) -> bool:
