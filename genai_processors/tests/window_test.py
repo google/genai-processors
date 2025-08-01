@@ -103,7 +103,7 @@ class WindowProcessorTest(unittest.IsolatedAsyncioTestCase):
   async def test_window(self):
     input_stream = streams.stream_content([
         '1',
-        content_api.END_OF_TURN,
+        content_api.ProcessorPart.end_of_turn(),
         '2',
     ])
     output_parts = await streams.gather_stream(
@@ -120,7 +120,7 @@ class WindowProcessorTest(unittest.IsolatedAsyncioTestCase):
 
     input_stream = streams.stream_content([
         '1',
-        content_api.END_OF_TURN,
+        content_api.ProcessorPart.end_of_turn(),
         '2',
     ])
     output_parts = await streams.gather_stream(
@@ -151,7 +151,9 @@ class WindowProcessorTest(unittest.IsolatedAsyncioTestCase):
 
       concurrent_executions -= 1
 
-    input_stream = streams.stream_content(['1', content_api.END_OF_TURN] * 10)
+    input_stream = streams.stream_content(
+        ['1', content_api.ProcessorPart.end_of_turn()] * 10
+    )
     output_parts = await streams.gather_stream(
         window.Window(window_processor, max_concurrency=1)(input_stream)
     )
@@ -177,16 +179,16 @@ class HistoryCompressionTest(absltest.TestCase):
     policy = window.keep_last_n_turns(turns_to_keep=2)
     history = collections.deque()
     history.append(ProcessorPart('a'))
-    history.append(content_api.END_OF_TURN)
+    history.append(content_api.ProcessorPart.end_of_turn())
     history.append(ProcessorPart('b'))
-    history.append(content_api.END_OF_TURN)
+    history.append(content_api.ProcessorPart.end_of_turn())
     history.append(ProcessorPart('c'))
 
     asyncio.run(policy(history))
 
     self.assertLen(history, 3)
     self.assertEqual(history[0].text, 'b')
-    self.assertEqual(history[1], content_api.END_OF_TURN)
+    self.assertEqual(history[1], content_api.ProcessorPart.end_of_turn())
     self.assertEqual(history[2].text, 'c')
 
 

@@ -296,7 +296,9 @@ class Window(Processor):
             async for part in self._window_processor(prompt_for_window):
               await single_window_output_queue.put(part)
           finally:
-            await single_window_output_queue.put(content_api.END_OF_TURN)
+            await single_window_output_queue.put(
+                content_api.ProcessorPart.end_of_turn()
+            )
             await single_window_output_queue.put(None)
 
       processor.create_task(run_window_processor())
