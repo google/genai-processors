@@ -16,7 +16,7 @@
 Provides:
  * Turn based, single prompt inference
  * Multimodal input support (text + images)
- * Flexible Jinja-based prompt templating
+ * Flexible prompt templating
 
 Tools are currently not supported on GenAI processors level: tool calls and
 responses are not translated beween ProcessorParts and LangChain AIMessages.

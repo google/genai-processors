@@ -16,8 +16,10 @@ from unittest import mock
 from absl.testing import parameterized
 from genai_processors import content_api
 from genai_processors import processor
+from genai_processors import streams
 from genai_processors.contrib.langchain_model import LangChainModel
 from langchain_core import messages as langchain_messages
+from langchain_core.prompts import ChatPromptTemplate
 
 
 class MockChunk:
@@ -27,38 +29,6 @@ class MockChunk:
     self.content = content
 
 
-class MockChatModel:
-  """Fake BaseChatModel that streams back provided MockChunk objects."""
-
-  def __init__(self, chunks):
-    self._chunks = [MockChunk(c) for c in chunks]
-    self.model = 'mock-model'
-
-  async def astream(self, payload):
-    """Asynchronously stream chunks, simulating LangChain behavior.
-
-    Args:
-        payload: The input to the model (list of messages or dict with 'input').
-
-    Yields:
-        MockChunk: Each chunk in the preconfigured sequence.
-    """
-    if isinstance(payload, dict) and 'input' in payload:
-      pass
-    else:
-      for msg in payload:
-        assert isinstance(
-            msg,
-            (
-                langchain_messages.HumanMessage,
-                langchain_messages.SystemMessage,
-                langchain_messages.AIMessage,
-            ),
-        ), f'Invalid message type: {type(msg)}'
-    for chunk in self._chunks:
-      yield chunk
-
-
 class LangChainModelTest(
     unittest.IsolatedAsyncioTestCase, parameterized.TestCase
 ):
@@ -66,11 +36,14 @@ class LangChainModelTest(
 
   def test_text_only_sync(self):
     """Single-turn, non-streaming inference via `apply_sync` with a single text part."""
-    llm = MockChatModel(['Hello', ' world'])
-    proc = LangChainModel(llm=llm)
+    mock_llm = mock.Mock(model='mock-model')
+    mock_llm.astream.return_value = streams.stream_content(
+        [MockChunk('Hello'), MockChunk(' world')]
+    )
+    proc = LangChainModel(llm=mock_llm)
     output = processor.apply_sync(proc, ['Hi there'])
 
-    self.assertEqual(len(output), 2)
+    self.assertLen(output, 2)
     self.assertEqual(output[0].text, 'Hello')
     self.assertEqual(output[0].role, 'model')
     self.assertEqual(output[0].metadata, {'model': 'mock-model'})
@@ -80,8 +53,11 @@ class LangChainModelTest(
 
   def test_streaming_sync(self):
     """A turn with multiple text parts that streams three chunks in sequence."""
-    llm = MockChatModel(['A', 'B', 'C'])
-    proc = LangChainModel(llm=llm)
+    mock_llm = mock.Mock(model='mock-model')
+    mock_llm.astream.return_value = streams.stream_content(
+        [MockChunk('A'), MockChunk('B'), MockChunk('C')]
+    )
+    proc = LangChainModel(llm=mock_llm)
     output = processor.apply_sync(proc, ['Question 1', 'Question 2'])
 
     self.assertEqual(content_api.as_text(output), 'ABC')
@@ -90,10 +66,9 @@ class LangChainModelTest(
     """Verify roles and image handling via astream call inputs."""
     mock_llm = mock.Mock(model='mock-model')
 
-    async def mock_astream(_):
-      yield MockChunk('mocked')
-
-    mock_llm.astream.side_effect = mock_astream
+    mock_llm.astream.return_value = streams.stream_content(
+        [MockChunk('mocked')]
+    )
 
     proc = LangChainModel(llm=mock_llm)
 
@@ -145,8 +120,8 @@ class LangChainModelTest(
 
     If multiple fragments are present the order must be preserved.
     """
-    llm = MockChatModel([])
-    proc = LangChainModel(llm=llm)
+    mock_llm = mock.Mock(model='mock-model')
+    proc = LangChainModel(llm=mock_llm)
 
     parts = [
         content_api.ProcessorPart(
@@ -187,8 +162,8 @@ class LangChainModelTest(
 
   def test_single_text_message_conversion(self):
     """A single text part is converted to a string-based LangChain message."""
-    llm = MockChatModel([])
-    proc = LangChainModel(llm=llm)
+    mock_llm = mock.Mock(model='mock-model')
+    proc = LangChainModel(llm=mock_llm)
 
     parts = [
         content_api.ProcessorPart(
@@ -207,8 +182,13 @@ class LangChainModelTest(
 
   def test_system_instruction(self):
     """System instruction is prepended as a SystemMessage in the full pipeline."""
-    llm = MockChatModel(['Response'])
-    proc = LangChainModel(llm=llm, system_instruction='You are a helpful AI.')
+    mock_llm = mock.Mock(model='mock-model')
+    mock_llm.astream.return_value = streams.stream_content(
+        [MockChunk('Response')]
+    )
+    proc = LangChainModel(
+        llm=mock_llm, system_instruction='You are a helpful AI.'
+    )
 
     parts = [
         content_api.ProcessorPart(
@@ -227,9 +207,16 @@ class LangChainModelTest(
 
   def test_prompt_template(self):
     """Prompt template is applied to messages if provided."""
-    llm = MockChatModel(['Formatted response'])
-    prompt_template = 'User input: {{ messages }}'
-    proc = LangChainModel(llm=llm, prompt_template=prompt_template)
+    mock_llm = mock.Mock(model='mock-model')
+    mock_llm.astream.return_value = streams.stream_content(
+        [MockChunk('Formatted response')]
+    )
+    prompt_template = [('system', 'Be funny.'), ('placeholder', '{messages}')]
+    # Equivalently:'User input: {messages}'
+    proc = LangChainModel(
+        llm=mock_llm,
+        prompt_template=ChatPromptTemplate(prompt_template),
+    )
 
     parts = [
         content_api.ProcessorPart(
@@ -246,14 +233,20 @@ class LangChainModelTest(
     self.assertEqual(output[0].role, 'model')
     self.assertEqual(output[0].metadata, {'model': 'mock-model'})
 
+    # Verify that the prompt template was actually applied.
+    called_args = mock_llm.astream.call_args[0][0]
+    self.assertEqual(
+        called_args, {'input': 'System: Be funny.\nHuman: Test input'}
+    )
+
   @parameterized.parameters(
       ('audio/mpeg', b'\x00\x01'),
       ('video/mp4', b'\x00\x02'),
   )
   def test_unsupported_mimetype_raises(self, mime_type, raw_data):
     """Unsupported MIME types should raise a ValueError."""
-    llm = MockChatModel([])
-    proc = LangChainModel(llm=llm)
+    mock_llm = mock.Mock(model='mock-model')
+    proc = LangChainModel(llm=mock_llm)
 
     bad_parts = [
         content_api.ProcessorPart(
