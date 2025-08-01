@@ -72,7 +72,7 @@ class RealTimeConversationTest(
                   mimetype='audio/wav',
                   role='user',
               ),
-              content_api.END_OF_TURN,
+              content_api.ProcessorPart.end_of_turn(),
               ProcessorPart('yo', role='user'),
               ProcessorPart(
                   create_image(100, 100),

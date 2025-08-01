@@ -400,6 +400,10 @@ class ProcessorPart:
     return cls(part, **kwargs)
 
   @classmethod
+  def end_of_turn(cls) -> 'ProcessorPart':
+    return ProcessorPart('', role='user', metadata={'turn_complete': True})
+
+  @classmethod
   def from_dict(cls, *, data: dict[str, Any]) -> 'ProcessorPart':
     """Deserializes a ProcessorPart from a JSON-compatible dictionary.
 
@@ -589,7 +593,9 @@ class ProcessorContent:
     return sum(1 for _ in self)
 
 
-END_OF_TURN = ProcessorPart('', role='user', metadata={'turn_complete': True})
+# Prefer using ProcessorPart.end_of_turn() instead: it is too easy to mutate
+# this global object.
+END_OF_TURN = ProcessorPart.end_of_turn()
 
 
 def is_end_of_turn(part: ProcessorPart) -> bool:
