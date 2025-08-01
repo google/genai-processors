@@ -28,9 +28,11 @@ import os
 from absl import flags
 from genai_processors import content_api
 from genai_processors import processor
+from genai_processors.contrib.langchain_model import LangChainModel
 from genai_processors.core import genai_model
 from genai_processors.core import ollama_model
 from google.genai import types as genai_types
+import langchain_google_genai
 
 FLAGS = flags.FLAGS
 
@@ -38,6 +40,7 @@ FLAGS = flags.FLAGS
 class _ModelType(enum.Enum):
   GEMINI = 'gemini'
   OLLAMA = 'ollama'
+  LANGCHAIN = 'langchain'
 
 
 _MODEL_TYPE = flags.DEFINE_enum(
@@ -108,5 +111,11 @@ def turn_based_model(
             system_instruction=system_instruction
         ),
     )
+
+  if _MODEL_TYPE.value == _ModelType.LANGCHAIN.value:
+    if not model_name:
+      model_name = 'gemini-2.0-flash-lite'
+    llm = langchain_google_genai.ChatGoogleGenerativeAI(model=model_name)
+    return LangChainModel(model=llm, system_instruction=system_instruction)
 
   raise ValueError(f'{_MODEL_TYPE.value!r} is not supported.')
